@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/cloudtrail/types"
 	"github.com/datadog/grimoire/pkg/grimoire/common"
 	log "github.com/sirupsen/logrus"
+	"strings"
 	"time"
 )
 
@@ -31,13 +32,22 @@ type CloudTrailEventLookupOptions struct {
 
 	// Once the first event is found, how much time to wait until there is no new event
 	DebounceTimeAfterFirstEvent time.Duration
+
+	// Exclude specific CloudTrail events from the search
+	ExcludeEvents []string
 }
 
 func (m *CloudTrailDataStore) FindLogs(detonationId grimoire.DetonationID) ([]map[string]interface{}, error) {
+	exclusion := ""
+	if len(m.Options.ExcludeEvents) > 0 {
+		exclusion = fmt.Sprintf("AND eventName NOT IN (%s)", strings.Join(m.Options.ExcludeEvents, ","))
+	}
+
 	query := fmt.Sprintf(
-		`SELECT eventjson FROM %s WHERE userAgent = '%s' ORDER BY eventTime ASC`,
+		`SELECT eventjson FROM %s WHERE userAgent = '%s' %s ORDER BY eventTime ASC`,
 		m.DataStoreId,
 		string(detonationId),
+		exclusion,
 	)
 	log.Info(query)
 	return m.findEvents(query)
@@ -94,6 +104,7 @@ func (m *CloudTrailDataStore) runQuery(query string) ([]map[string]interface{}, 
 	}
 
 	// Note: We assume that any CloudTrail Lake query eventually finishes
+	// TODO: use contexts with the proper deadline
 	for {
 		queryResults, err := m.CloudtrailClient.GetQueryResults(context.Background(), &cloudtrail.GetQueryResultsInput{
 			QueryId:        result.QueryId,
@@ -120,6 +131,7 @@ func (m *CloudTrailDataStore) runQuery(query string) ([]map[string]interface{}, 
 	}
 }
 
+// Utility methods
 func flatten(events [][]map[string]string) []map[string]interface{} {
 	flattened := []map[string]interface{}{}
 	for i := range events {

@@ -13,14 +13,17 @@ type StratusRedTeamDetonator struct {
 	StratusRunner   stratusrunner.Runner
 }
 
-func NewStratusRedTeamDetonator(ttp string) *StratusRedTeamDetonator {
-	return &StratusRedTeamDetonator{
-		AttackTechnique: stratus.GetRegistry().GetAttackTechniqueByName(ttp),
+func NewStratusRedTeamDetonator(attackTechniqueID string) (*StratusRedTeamDetonator, error) {
+	ttp := stratus.GetRegistry().GetAttackTechniqueByName(attackTechniqueID)
+	if ttp == nil {
+		return nil, fmt.Errorf("Stratus Red Team attack technique %s not found", attackTechniqueID)
 	}
+	return &StratusRedTeamDetonator{AttackTechnique: ttp}, nil
 }
 
 func (m *StratusRedTeamDetonator) Detonate() (grimoire.DetonationID, error) {
 	ttp := m.AttackTechnique
+
 	m.StratusRunner = stratusrunner.NewRunner(ttp, stratusrunner.StratusRunnerNoForce)
 
 	if _, err := m.StratusRunner.WarmUp(); err != nil {

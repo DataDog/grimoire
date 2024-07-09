@@ -57,16 +57,19 @@ func (m *RunCommand) Do() error {
 	if err := m.Validate(); err != nil {
 		return err
 	}
-	detonator := detonators.NewStratusRedTeamDetonator(m.stratusRedTeamAttackTechnique)
+	detonator, err := detonators.NewStratusRedTeamDetonator(m.stratusRedTeamAttackTechnique)
+	if err != nil {
+		return err
+	}
 	awsConfig, _ := config.LoadDefaultConfig(context.Background())
 	cloudtrailLogs := &logs.CloudTrailDataStore{
 		CloudtrailClient: cloudtrail.NewFromConfig(awsConfig),
 		DataStoreId:      "4cee9f76-991a-46fc-9c49-7ab50d19d83d", // TODO
 		Options: &logs.CloudTrailEventLookupOptions{
 			//WaitAtLeast:         30 * time.Second,
-			WaitAtMost:                  5 * time.Minute,
+			WaitAtMost:                  10 * time.Minute,
 			SearchInterval:              1 * time.Second,
-			DebounceTimeAfterFirstEvent: 10 * time.Second,
+			DebounceTimeAfterFirstEvent: 120 * time.Second,
 		},
 	}
 
@@ -101,7 +104,9 @@ func (m *RunCommand) writeToFile(events []map[string]interface{}) error {
 		return err
 	}
 
-	if err := os.WriteFile(m.outputFile, outputBytes, 0600); err != nil {
+	if m.outputFile == "-" {
+		fmt.Println(string(outputBytes))
+	} else if err := os.WriteFile(m.outputFile, outputBytes, 0600); err != nil {
 		return err
 	}
 	return nil

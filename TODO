@@ -1,0 +1,8 @@
+Parallel detonation:
+1. Detonate attack techniques in parallel (possibly with a max parallelism)
+2. Run CloudTrail SQL Lake query (only one) looking for all UA detonations
+3. Output logs as we go
+    => Where to write? (e.g. one file per TTP)
+
+
+Grimoire shell?
