@@ -19,6 +19,13 @@ type CloudTrailDataStore struct {
 	Options          *CloudTrailEventLookupOptions
 }
 
+type UserAgentMatchType int
+
+const (
+	UserAgentMatchTypeExact UserAgentMatchType = iota
+	UserAgentMatchTypePartial
+)
+
 type CloudTrailEventLookupOptions struct {
 	// Timeout to find the *first* CloudTrail event
 	WaitAtMost time.Duration
@@ -35,29 +42,50 @@ type CloudTrailEventLookupOptions struct {
 
 	// Exclude specific CloudTrail events from the search
 	ExcludeEvents []string
+
+	// UserAgentMatchType is the type of match to use when filtering by UserAgent
+	UserAgentMatchType UserAgentMatchType
 }
 
-func (m *CloudTrailDataStore) FindLogs(detonationId grimoire.DetonationID) ([]map[string]interface{}, error) {
+func (m *CloudTrailDataStore) FindLogs(detonationId grimoire.DetonationID, logsChan *chan *map[string]interface{}) ([]map[string]interface{}, error) {
 	exclusion := ""
 	if len(m.Options.ExcludeEvents) > 0 {
 		exclusion = fmt.Sprintf("AND eventName NOT IN (%s)", strings.Join(m.Options.ExcludeEvents, ","))
 	}
 
+	var userAgentQuery = ""
+	switch m.Options.UserAgentMatchType {
+	case UserAgentMatchTypeExact:
+		userAgentQuery = fmt.Sprintf("userAgent = '%s'", detonationId)
+	case UserAgentMatchTypePartial:
+		userAgentQuery = fmt.Sprintf("userAgent LIKE '%%%s%%'", detonationId)
+	}
+
 	query := fmt.Sprintf(
-		`SELECT eventjson FROM %s WHERE userAgent = '%s' %s ORDER BY eventTime ASC`,
+		`SELECT eventjson FROM %s WHERE %s %s ORDER BY eventTime ASC`,
 		m.DataStoreId,
-		string(detonationId),
+		userAgentQuery,
 		exclusion,
 	)
 	log.Info(query)
-	return m.findEvents(query)
+
+	return m.findEvents(query, logsChan)
 }
 
-func (m *CloudTrailDataStore) findEvents(query string) ([]map[string]interface{}, error) {
+/*
+	func mytest() {
+		ctx, cancel := context.WithCancel()
+		timer := time.AfterFunc(10*time.Second, func() {
+			cancel()
+		})
+		timer.Stop()
+	}
+*/
+func (m *CloudTrailDataStore) findEvents(query string, logsChan *chan *map[string]interface{}) ([]map[string]interface{}, error) {
 	if m.Options.WaitAtLeast.Seconds() > m.Options.WaitAtMost.Seconds() {
 		return nil, fmt.Errorf("invalid Options ('wait at least' should be lower or equal to 'wait at most')")
 	}
-	allEvents := []map[string]interface{}{}
+	var allEvents = []map[string]interface{}{}
 	now := time.Now()
 	waitAtLeastUntil := now.Add(m.Options.WaitAtLeast)
 	deadline := now.Add(m.Options.WaitAtMost)
@@ -70,11 +98,11 @@ func (m *CloudTrailDataStore) findEvents(query string) ([]map[string]interface{}
 		}
 		if len(events) > 0 {
 			// Add the events we found to our current set of events, removing any duplicates
-			var newEventsFound int
+			var newEventsFound []*map[string]interface{}
 			allEvents, newEventsFound = dedupeAndAppend(allEvents, events)
 
-			if newEventsFound > 0 {
-				log.Infof("Found %d new CloudTrail events", newEventsFound)
+			if len(newEventsFound) > 0 {
+				log.Infof("Found %d new CloudTrail events", len(newEventsFound))
 				// At this point, we found at least CloudTrail event
 				// We now want to set a new "deadline", i.e. when we'll stop searching for further events
 				// Set this new deadline, honoring both "wait at least X" and "wait for Y seconds after new events" constraints
@@ -82,6 +110,11 @@ func (m *CloudTrailDataStore) findEvents(query string) ([]map[string]interface{}
 				// Note: The loop will continue as long as we keep finding new CloudTrail events
 				newDeadline := time.Now().Add(m.Options.DebounceTimeAfterFirstEvent)
 				deadline = latest(newDeadline, waitAtLeastUntil)
+				if logsChan != nil {
+					for _, newEvent := range newEventsFound {
+						*logsChan <- newEvent
+					}
+				}
 			}
 		}
 		time.Sleep(m.Options.SearchInterval)
@@ -107,8 +140,7 @@ func (m *CloudTrailDataStore) runQuery(query string) ([]map[string]interface{}, 
 	// TODO: use contexts with the proper deadline
 	for {
 		queryResults, err := m.CloudtrailClient.GetQueryResults(context.Background(), &cloudtrail.GetQueryResultsInput{
-			QueryId:        result.QueryId,
-			EventDataStore: aws.String(m.DataStoreId),
+			QueryId: result.QueryId,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("unable to retrieve CloudTrail Lake query results: %w", err)
@@ -145,7 +177,7 @@ func flatten(events [][]map[string]string) []map[string]interface{} {
 	return flattened
 }
 
-func dedupeAndAppend(allEvents []map[string]interface{}, newEvents []map[string]interface{}) ([]map[string]interface{}, int) {
+func dedupeAndAppend(allEvents []map[string]interface{}, newEvents []map[string]interface{}) ([]map[string]interface{}, []*map[string]interface{}) {
 	// Build a set of event IDs
 	//TODO don't rebuild every time
 	eventIDs := map[string]bool{}
@@ -156,16 +188,16 @@ func dedupeAndAppend(allEvents []map[string]interface{}, newEvents []map[string]
 	}
 
 	// Add events we don't have yet
-	numNewEvents := 0
+	actualNewEvents := []*map[string]interface{}{}
 	for _, newEvent := range newEvents {
 		eventID := newEvent[EventIDKey].(string)
 		if _, eventExists := eventIDs[eventID]; !eventExists {
 			allEvents = append(allEvents, newEvent)
-			numNewEvents++
+			actualNewEvents = append(actualNewEvents, &newEvent)
 		}
 	}
 
-	return allEvents, numNewEvents
+	return allEvents, actualNewEvents
 }
 
 // latest returns the time.Time which is the further away

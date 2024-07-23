@@ -80,7 +80,7 @@ func (m *RunCommand) Do() error {
 	}
 	defer detonator.CleanUp() // Note: cleanup needs to be done after we're done searching for logs
 
-	events, err := cloudtrailLogs.FindLogs(detonationID)
+	events, err := cloudtrailLogs.FindLogs(detonationID, nil)
 	if err != nil {
 		return err
 	}
