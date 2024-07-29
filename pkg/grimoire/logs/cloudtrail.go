@@ -34,6 +34,9 @@ type CloudTrailEventLookupOptions struct {
 	// Can be useful if for instance specific events are logged much faster than others
 	WaitAtLeast time.Duration
 
+	// Wait for at most this number of events to be found
+	WaitAtMostNumberOfEvents int
+
 	// Issue a new CloudTrail Lake search query every SearchInterval
 	SearchInterval time.Duration
 
@@ -47,7 +50,16 @@ type CloudTrailEventLookupOptions struct {
 	UserAgentMatchType UserAgentMatchType
 }
 
-func (m *CloudTrailDataStore) FindLogs(detonationId grimoire.DetonationID, logsChan *chan *map[string]interface{}) ([]map[string]interface{}, error) {
+type CloudTrailResult struct {
+	CloudTrailEvent *map[string]interface{}
+	Error           error
+}
+
+func (m *CloudTrailDataStore) FindLogs(detonationId grimoire.DetonationID) (chan *CloudTrailResult, error) {
+	if m.Options.WaitAtLeast.Seconds() > m.Options.WaitAtMost.Seconds() {
+		return nil, fmt.Errorf("invalid Options ('wait at least' should be lower or equal to 'wait at most')")
+	}
+
 	exclusion := ""
 	if len(m.Options.ExcludeEvents) > 0 {
 		exclusion = fmt.Sprintf("AND eventName NOT IN (%s)", strings.Join(m.Options.ExcludeEvents, ","))
@@ -67,24 +79,21 @@ func (m *CloudTrailDataStore) FindLogs(detonationId grimoire.DetonationID, logsC
 		userAgentQuery,
 		exclusion,
 	)
-	log.Info(query)
+	log.Info("Looking for CloudTrail logs in CloudTrail Lake...")
+	log.Debug(query)
 
-	return m.findEvents(query, logsChan)
+	return m.findEvents(query)
 }
 
-/*
-	func mytest() {
-		ctx, cancel := context.WithCancel()
-		timer := time.AfterFunc(10*time.Second, func() {
-			cancel()
-		})
-		timer.Stop()
-	}
-*/
-func (m *CloudTrailDataStore) findEvents(query string, logsChan *chan *map[string]interface{}) ([]map[string]interface{}, error) {
-	if m.Options.WaitAtLeast.Seconds() > m.Options.WaitAtMost.Seconds() {
-		return nil, fmt.Errorf("invalid Options ('wait at least' should be lower or equal to 'wait at most')")
-	}
+func (m *CloudTrailDataStore) findEvents(query string) (chan *CloudTrailResult, error) {
+	results := make(chan *CloudTrailResult) //TODO split result and error channels?
+	go m.findEventsAsync(query, results)
+	return results, nil
+}
+
+func (m *CloudTrailDataStore) findEventsAsync(query string, results chan *CloudTrailResult) {
+	defer close(results)
+
 	var allEvents = []map[string]interface{}{}
 	now := time.Now()
 	waitAtLeastUntil := now.Add(m.Options.WaitAtLeast)
@@ -94,7 +103,8 @@ func (m *CloudTrailDataStore) findEvents(query string, logsChan *chan *map[strin
 	for time.Now().Before(deadline) {
 		events, err := m.runQuery(query)
 		if err != nil {
-			return nil, err
+			results <- &CloudTrailResult{Error: fmt.Errorf("unable to run CloudTrail Lake query: %w", err)}
+			return
 		}
 		if len(events) > 0 {
 			// Add the events we found to our current set of events, removing any duplicates
@@ -110,25 +120,32 @@ func (m *CloudTrailDataStore) findEvents(query string, logsChan *chan *map[strin
 				// Note: The loop will continue as long as we keep finding new CloudTrail events
 				newDeadline := time.Now().Add(m.Options.DebounceTimeAfterFirstEvent)
 				deadline = latest(newDeadline, waitAtLeastUntil)
-				if logsChan != nil {
-					for _, newEvent := range newEventsFound {
-						*logsChan <- newEvent
-					}
+				for _, newEvent := range newEventsFound {
+					log.Debug("Publishing new event to asynchronous channel")
+					results <- &CloudTrailResult{CloudTrailEvent: newEvent}
 				}
+
+				// If we reached the max number of events to wait for, return as soon as possible
+				if m.Options.WaitAtMostNumberOfEvents > 0 && len(allEvents) >= m.Options.WaitAtMostNumberOfEvents {
+					return
+				}
+			} else {
+				log.Debug("Some CloudTrail events were returned, but no previously-unseen events were found")
 			}
 		}
+		log.Debugf("Sleeping for SearchInterval=%f seconds", m.Options.SearchInterval.Seconds())
 		time.Sleep(m.Options.SearchInterval)
 	}
 
 	if len(allEvents) == 0 {
-		return nil, fmt.Errorf("timed out after %f seconds waiting for CloudTrail logs", m.Options.WaitAtMost.Seconds())
+		results <- &CloudTrailResult{Error: fmt.Errorf("timed out after %f seconds waiting for CloudTrail logs", m.Options.WaitAtMost.Seconds())}
+		return
 	}
-
-	return allEvents, nil
 }
 
-// runQuery runs a specific CloudTrail Lake query, waits for the resultsand returns it
+// runQuery runs a specific CloudTrail Lake query, waits for the result sand returns it
 func (m *CloudTrailDataStore) runQuery(query string) ([]map[string]interface{}, error) {
+	log.Debugf("Running CloudTrail Lake query %s", query)
 	result, err := m.CloudtrailClient.StartQuery(context.Background(), &cloudtrail.StartQueryInput{
 		QueryStatement: aws.String(query),
 	})
@@ -150,11 +167,13 @@ func (m *CloudTrailDataStore) runQuery(query string) ([]map[string]interface{}, 
 		if queryStatus == types.QueryStatusQueued || queryStatus == types.QueryStatusRunning {
 			// The query is still running
 			time.Sleep(1 * time.Second)
+			log.Debug("Query is still running...")
 			continue
 		} else if queryStatus == types.QueryStatusFailed || queryStatus == types.QueryStatusCancelled {
 			// The query failed or was cancelled for some reason
 			return nil, fmt.Errorf("failed running CloudTrail Lake query: status %s", queryStatus)
 		} else if queryStatus == types.QueryStatusFinished {
+			log.Debug("Query finished, gathering results")
 			// The query is done!
 			return flatten(queryResults.QueryResultRows), nil
 		} else {

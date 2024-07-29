@@ -15,8 +15,6 @@ import (
 	"time"
 )
 
-// TODO: rename 'run'
-
 type RunCommand struct {
 	stratusRedTeamAttackTechnique string
 	outputFile                    string
@@ -68,7 +66,7 @@ func (m *RunCommand) Do() error {
 		Options: &logs.CloudTrailEventLookupOptions{
 			//WaitAtLeast:         30 * time.Second,
 			WaitAtMost:                  10 * time.Minute,
-			SearchInterval:              1 * time.Second,
+			SearchInterval:              5 * time.Second,
 			DebounceTimeAfterFirstEvent: 120 * time.Second,
 		},
 	}
@@ -80,16 +78,23 @@ func (m *RunCommand) Do() error {
 	}
 	defer detonator.CleanUp() // Note: cleanup needs to be done after we're done searching for logs
 
-	events, err := cloudtrailLogs.FindLogs(detonationID, nil)
+	log.Info("Stratus Red Team attack technique successfully detonated")
+	var allEvents []map[string]interface{}
+	results, err := cloudtrailLogs.FindLogs(detonationID)
 	if err != nil {
 		return err
 	}
 
-	for _, evt := range events {
-		log.Infof("%s: %s", evt["eventTime"], evt["eventName"])
+	for evt := range results {
+		if evt.Error != nil {
+			//TODO: should we write the events we have so far to the output file before exiting?
+			return evt.Error
+		}
+		log.Infof("%s: %s", (*evt.CloudTrailEvent)["eventTime"], (*evt.CloudTrailEvent)["eventName"])
+		allEvents = append(allEvents, *evt.CloudTrailEvent)
 	}
 
-	if err := m.writeToFile(events); err != nil {
+	if err := m.writeToFile(allEvents); err != nil {
 		return fmt.Errorf("unable to write events to file: %w", err)
 	}
 	return nil
