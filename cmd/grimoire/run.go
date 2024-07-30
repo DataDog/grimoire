@@ -12,12 +12,14 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 )
 
 type RunCommand struct {
-	stratusRedTeamAttackTechnique string
-	outputFile                    string
+	StratusRedTeamDetonator *detonators.StratusRedTeamDetonator
+	OutputFile              string
 }
 
 func NewRunCommand() *cobra.Command {
@@ -30,9 +32,16 @@ func NewRunCommand() *cobra.Command {
 		SilenceUsage: true,
 		Example:      "TODO",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if stratusRedTeamAttackTechnique == "" {
+				return errors.New("missing Stratus Red Team attack technique")
+			}
+			detonator, err := detonators.NewStratusRedTeamDetonator(stratusRedTeamAttackTechnique)
+			if err != nil {
+				return err
+			}
 			command := RunCommand{
-				stratusRedTeamAttackTechnique: stratusRedTeamAttackTechnique,
-				outputFile:                    outputFile,
+				StratusRedTeamDetonator: detonator,
+				OutputFile:              outputFile,
 			}
 			return command.Do()
 		},
@@ -44,21 +53,7 @@ func NewRunCommand() *cobra.Command {
 	return runCmd
 }
 
-func (m *RunCommand) Validate() error {
-	if m.stratusRedTeamAttackTechnique == "" {
-		return errors.New("missing Stratus Red Team attack technique")
-	}
-	return nil
-}
-
 func (m *RunCommand) Do() error {
-	if err := m.Validate(); err != nil {
-		return err
-	}
-	detonator, err := detonators.NewStratusRedTeamDetonator(m.stratusRedTeamAttackTechnique)
-	if err != nil {
-		return err
-	}
 	awsConfig, _ := config.LoadDefaultConfig(context.Background())
 	cloudtrailLogs := &logs.CloudTrailEventsFinder{
 		CloudtrailClient: cloudtrail.NewFromConfig(awsConfig),
@@ -70,14 +65,26 @@ func (m *RunCommand) Do() error {
 		},
 	}
 
-	log.Infof("Detonating %s", detonator)
-	detonation, err := detonator.Detonate()
+	log.Infof("Detonating %s", m.StratusRedTeamDetonator.AttackTechnique)
+	detonation, err := m.StratusRedTeamDetonator.Detonate()
 	if err != nil {
 		return err
 	}
 
-	//TODO critical: catch ctrl+c and cleanup if appropriate
-	defer detonator.CleanUp() // Note: cleanup needs to be done after we're done searching for logs
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		log.Info("Exiting Grimoire cleanly, don't press Ctrl+C again")
+		time.Sleep(1 * time.Minute)
+		if err := m.Exit(); err != nil {
+			log.Errorf("unable to exit Grimoire cleanly: %v", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}()
+
+	defer m.Exit()
 
 	log.Info("Stratus Red Team attack technique successfully detonated")
 	var allEvents []map[string]interface{}
@@ -95,6 +102,8 @@ func (m *RunCommand) Do() error {
 		}
 		log.Infof("%s: %s", (*evt.CloudTrailEvent)["eventTime"], (*evt.CloudTrailEvent)["eventName"])
 		allEvents = append(allEvents, *evt.CloudTrailEvent)
+
+		//TODO stream events to file
 	}
 
 	if err := m.writeToFile(allEvents); err != nil {
@@ -104,7 +113,7 @@ func (m *RunCommand) Do() error {
 }
 
 func (m *RunCommand) writeToFile(events []map[string]interface{}) error {
-	if m.outputFile == "" {
+	if m.OutputFile == "" {
 		return nil // nothing to do
 	}
 	outputBytes, err := json.MarshalIndent(events, "", "   ")
@@ -112,10 +121,20 @@ func (m *RunCommand) writeToFile(events []map[string]interface{}) error {
 		return err
 	}
 
-	if m.outputFile == "-" {
+	if m.OutputFile == "-" {
 		fmt.Println(string(outputBytes))
-	} else if err := os.WriteFile(m.outputFile, outputBytes, 0600); err != nil {
+	} else if err := os.WriteFile(m.OutputFile, outputBytes, 0600); err != nil {
 		return err
+	}
+	return nil
+}
+
+// Exits Grimoire cleanly
+// It's expected that running Ctrl+C is a pretty common use-case with Grimoire
+func (m *RunCommand) Exit() error {
+	if err := m.StratusRedTeamDetonator.CleanUp(); err != nil {
+		log.Warnf("unable to cleanup Stratus Red Team attack technique %s: %v", m.StratusRedTeamDetonator.AttackTechnique, err)
+		log.Warnf("You might want to manually clean it up by running 'stratus cleanup %s'", m.StratusRedTeamDetonator.AttackTechnique)
 	}
 	return nil
 }

@@ -59,7 +59,6 @@ func (m *CloudTrailEventsFinder) findEventsWithCloudTrail(detonation *detonators
 
 func (m *CloudTrailEventsFinder) findEventsWithCloudTrailAsync(detonation *detonators.DetonationInfo, results chan *CloudTrailResult) {
 	defer close(results)
-	defer close(results)
 
 	var allEvents = []map[string]interface{}{}
 	now := time.Now()
