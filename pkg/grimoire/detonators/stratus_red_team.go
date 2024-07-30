@@ -6,7 +6,6 @@ import (
 	_ "github.com/datadog/stratus-red-team/v2/pkg/stratus/loader"
 	stratusrunner "github.com/datadog/stratus-red-team/v2/pkg/stratus/runner"
 	log "github.com/sirupsen/logrus"
-	"math"
 	"time"
 )
 
@@ -30,18 +29,17 @@ func (m *StratusRedTeamDetonator) Detonate() (*DetonationInfo, error) {
 
 	m.StratusRunner = stratusrunner.NewRunner(ttp, stratusrunner.StratusRunnerNoForce)
 
-	log.Debugf("Warming up Stratus Red Team attack technique %s", ttp)
+	log.Infof("Warming up Stratus Red Team attack technique %s", ttp)
 	if _, err := m.StratusRunner.WarmUp(); err != nil {
 		return nil, fmt.Errorf("error warming up Stratus Red Team attack technique %s: %w", ttp, err)
 	}
 
 	startTime := time.Now()
-	log.Debugf("Detonating Stratus Red Team attack technique %s", ttp)
+	log.Infof("Detonating Stratus Red Team attack technique %s", ttp)
 	if err := m.StratusRunner.Detonate(); err != nil {
 		return nil, fmt.Errorf("error detonating Stratus Red Team attack technique %s: %w", ttp, err)
 	}
 	endTime := time.Now()
-	log.Debugf("Detonation done in %d seconds", int(math.Round(endTime.Sub(startTime).Seconds())))
 
 	return &DetonationInfo{
 		DetonationID: StratusRedTeamUserAgentPrefix + m.StratusRunner.GetUniqueExecutionId(),

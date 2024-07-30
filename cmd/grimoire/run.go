@@ -67,15 +67,7 @@ func (m *RunCommand) Do() error {
 		},
 	}
 
-	if m.OutputFile != "" {
-		if err := os.WriteFile(m.OutputFile, []byte("[]"), 0600); err != nil {
-			return fmt.Errorf("unable to create output file %s: %v", m.OutputFile, err)
-		}
-	}
-
-	log.Infof("Detonating %s", m.StratusRedTeamDetonator.AttackTechnique)
-	detonation, err := m.StratusRedTeamDetonator.Detonate()
-	if err != nil {
+	if err := utils.CreateOrTruncateJSONFile(m.OutputFile); err != nil {
 		return err
 	}
 
@@ -95,6 +87,11 @@ func (m *RunCommand) Do() error {
 		}
 		os.Exit(0)
 	}()
+
+	detonation, err := m.StratusRedTeamDetonator.Detonate()
+	if err != nil {
+		return err
+	}
 
 	defer m.Exit()
 
@@ -116,6 +113,7 @@ func (m *RunCommand) Do() error {
 				}
 				if evt.Error != nil {
 					log.Printf("Error processing event: %v", evt.Error)
+					cancel() //TODO: is this the right thing to do?
 					return
 				}
 				log.Printf("%s: %s", (*evt.CloudTrailEvent)["eventTime"], (*evt.CloudTrailEvent)["eventName"])
@@ -123,10 +121,8 @@ func (m *RunCommand) Do() error {
 				err := utils.AppendToJsonFileArray(m.OutputFile, *evt.CloudTrailEvent)
 				if err != nil {
 					log.Errorf("unable to write CloudTrail event to %s: %v", m.OutputFile, err)
-					return
+					cancel() //TODO: is this the right thing to do?
 				}
-
-				//TODO?
 
 			case <-ctx.Done():
 				log.Debug("Stopping event processing due to context cancellation")

@@ -60,10 +60,8 @@ func (m *ShellCommand) Do() error {
 		}
 	}()
 
-	if m.outputFile != "" {
-		if err := os.WriteFile(m.outputFile, []byte("[]"), 0600); err != nil {
-			return fmt.Errorf("unable to create output file %s: %v", m.outputFile, err)
-		}
+	if err := utils.CreateOrTruncateJSONFile(m.outputFile); err != nil {
+		return err
 	}
 
 	detonationUuid := utils.NewDetonationID()
