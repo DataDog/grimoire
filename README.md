@@ -41,7 +41,7 @@ export AWS_REGION=us-east-1
 
 ### Detonate an attack technique with [Stratus Red Team](https://github.com/DataDog/stratus-red-team):
 
-```
+```bash
 $ grimoire run --o /tmp/logs --stratus-red-team-attack-technique aws.credential-access.ssm-retrieve-securestring-parameters
 INFO[0000] Warming up Stratus Red Team attack technique aws.credential-access.ssm-retrieve-securestring-parameters
 INFO[0000] Detonating Stratus Red Team attack technique aws.credential-access.ssm-retrieve-securestring-parameters
@@ -61,7 +61,7 @@ Keep in mind that some Stratus Red Team attack techniques may take some time to 
 
 You can also detonate an attack manually in an interactive shell. In that case, Grimoire will spin up a new $SHELL for you, and inject the `AWS_EXECUTION_ENV` environment variable to ensure that the AWS CLI commands you run are captured.
 
-```
+```bash
 $ grimoire shell -o /tmp/logs
 INFO[0000] Grimoire will now run your shell and automatically inject a unique identifier to your HTTP user agent when using the AWS CLI
 INFO[0000] You can use the AWS CLI as usual. Press Ctrl+D or type 'exit' to return to Grimoire.
