@@ -88,7 +88,6 @@ func (m *CloudTrailEventsFinder) findEventsWithCloudTrailAsync(ctx context.Conte
 			allEvents, newEventsFound = dedupeAndAppend(allEvents, events)
 
 			if len(newEventsFound) > 0 {
-				log.Infof("Found %d new CloudTrail events", len(newEventsFound))
 				// At this point, we found at least CloudTrail event
 				// We now want to set a new "deadline", i.e. when we'll stop searching for further events
 				// Set this new deadline, honoring both "wait at least X" and "wait for Y seconds after new events" constraints
