@@ -1,9 +1,17 @@
 package detonators
 
-import "github.com/datadog/grimoire/pkg/grimoire/common"
+import (
+	"time"
+)
+
+type DetonationInfo struct {
+	DetonationID string
+	StartTime    time.Time
+	EndTime      time.Time
+}
 
 type Detonator interface {
 	String() string
-	Detonate() (grimoire.DetonationID, error)
+	Detonate() (*DetonationInfo, error)
 	CleanUp() error
 }

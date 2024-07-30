@@ -7,7 +7,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/cloudtrail"
 	"github.com/aws/aws-sdk-go-v2/service/cloudtrail/types"
-	"github.com/datadog/grimoire/pkg/grimoire/common"
+	"github.com/datadog/grimoire/pkg/grimoire/detonators"
 	log "github.com/sirupsen/logrus"
 	"strings"
 	"time"
@@ -55,7 +55,7 @@ type CloudTrailResult struct {
 	Error           error
 }
 
-func (m *CloudTrailDataStore) FindLogs(detonationId grimoire.DetonationID) (chan *CloudTrailResult, error) {
+func (m *CloudTrailDataStore) FindLogs(detonation *detonators.DetonationInfo) (chan *CloudTrailResult, error) {
 	if m.Options.WaitAtLeast.Seconds() > m.Options.WaitAtMost.Seconds() {
 		return nil, fmt.Errorf("invalid Options ('wait at least' should be lower or equal to 'wait at most')")
 	}
@@ -68,9 +68,9 @@ func (m *CloudTrailDataStore) FindLogs(detonationId grimoire.DetonationID) (chan
 	var userAgentQuery = ""
 	switch m.Options.UserAgentMatchType {
 	case UserAgentMatchTypeExact:
-		userAgentQuery = fmt.Sprintf("userAgent = '%s'", detonationId)
+		userAgentQuery = fmt.Sprintf("userAgent = '%s'", detonation.DetonationID)
 	case UserAgentMatchTypePartial:
-		userAgentQuery = fmt.Sprintf("userAgent LIKE '%%%s%%'", detonationId)
+		userAgentQuery = fmt.Sprintf("userAgent LIKE '%%%s%%'", detonation.DetonationID)
 	}
 
 	query := fmt.Sprintf(

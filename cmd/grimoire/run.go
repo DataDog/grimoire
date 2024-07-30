@@ -72,7 +72,7 @@ func (m *RunCommand) Do() error {
 	}
 
 	log.Infof("Detonating %s", detonator)
-	detonationID, err := detonator.Detonate()
+	detonation, err := detonator.Detonate()
 	if err != nil {
 		return err
 	}
@@ -80,7 +80,7 @@ func (m *RunCommand) Do() error {
 
 	log.Info("Stratus Red Team attack technique successfully detonated")
 	var allEvents []map[string]interface{}
-	results, err := cloudtrailLogs.FindLogs(detonationID)
+	results, err := cloudtrailLogs.FindLogs(detonation)
 	if err != nil {
 		return err
 	}

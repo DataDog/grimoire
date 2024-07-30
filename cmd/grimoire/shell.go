@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/cloudtrail"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	grimoire "github.com/datadog/grimoire/pkg/grimoire/common"
+	"github.com/datadog/grimoire/pkg/grimoire/detonators"
 	"github.com/datadog/grimoire/pkg/grimoire/logs"
 	"github.com/inancgumus/screen"
 	log "github.com/sirupsen/logrus"
@@ -81,6 +82,8 @@ func (m *ShellCommand) Do() error {
 		return err
 	}
 	screen.Clear()
+
+	startTime := time.Now()
 	cmd := exec.CommandContext(ctx, os.Getenv("SHELL"))
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -92,6 +95,7 @@ func (m *ShellCommand) Do() error {
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("unable to run shell: %v", err)
 	}
+	endTime := time.Now()
 	screen.Clear()
 	screen.MoveTopLeft()
 	log.Infof("Welcome back to Grimoire!")
@@ -107,7 +111,13 @@ func (m *ShellCommand) Do() error {
 		},
 	}
 
-	eventsChannel, err := cloudtrailLogs.FindLogs(detonationUuid)
+	detonationInfo := &detonators.DetonationInfo{
+		DetonationID: detonationUuid,
+		StartTime:    startTime,
+		EndTime:      endTime,
+	}
+
+	eventsChannel, err := cloudtrailLogs.FindLogs(detonationInfo)
 	if err != nil {
 		return fmt.Errorf("unable to search for CloudTrail events: %v", err)
 	}
