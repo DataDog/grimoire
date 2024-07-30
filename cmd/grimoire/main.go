@@ -6,26 +6,28 @@ import (
 	"os"
 )
 
-var rootCmd = &cobra.Command{
-	Use: "grimoire",
-}
-
 var enableVerboseLogging = false
 
+var rootCmd = &cobra.Command{
+	Use: "grimoire",
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		if enableVerboseLogging {
+			log.SetLevel(log.DebugLevel)
+		}
+	},
+}
+
 func init() {
+	rootCmd.PersistentFlags().BoolVarP(&enableVerboseLogging, "debug", "v", false, "Enable debug logging")
+
 	rootCmd.AddCommand(NewRunCommand())
 	rootCmd.AddCommand(NewShellCommand())
-	rootCmd.PersistentFlags().BoolVarP(&enableVerboseLogging, "debug", "v", true, "Enable debug logging")
-
 	// Disable creation of the "completion" command
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
-
-	if enableVerboseLogging {
-		log.SetLevel(log.DebugLevel)
-	}
 }
 
 func main() {
+
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}

@@ -8,9 +8,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/cloudtrail"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
-	grimoire "github.com/datadog/grimoire/pkg/grimoire/common"
 	"github.com/datadog/grimoire/pkg/grimoire/detonators"
 	"github.com/datadog/grimoire/pkg/grimoire/logs"
+	grimoire "github.com/datadog/grimoire/pkg/grimoire/utils"
 	"github.com/inancgumus/screen"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -100,14 +100,12 @@ func (m *ShellCommand) Do() error {
 	screen.MoveTopLeft()
 	log.Infof("Welcome back to Grimoire!")
 
-	cloudtrailLogs := &logs.CloudTrailDataStore{
+	cloudtrailLogs := &logs.CloudTrailEventsFinder{
 		CloudtrailClient: cloudtrail.NewFromConfig(awsConfig),
-		DataStoreId:      "4cee9f76-991a-46fc-9c49-7ab50d19d83d", // TODO
 		Options: &logs.CloudTrailEventLookupOptions{
 			WaitAtMost:                  10 * time.Minute,
 			SearchInterval:              15 * time.Second,
 			DebounceTimeAfterFirstEvent: 120 * time.Second,
-			UserAgentMatchType:          logs.UserAgentMatchTypePartial,
 		},
 	}
 

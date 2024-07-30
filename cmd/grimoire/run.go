@@ -60,9 +60,8 @@ func (m *RunCommand) Do() error {
 		return err
 	}
 	awsConfig, _ := config.LoadDefaultConfig(context.Background())
-	cloudtrailLogs := &logs.CloudTrailDataStore{
+	cloudtrailLogs := &logs.CloudTrailEventsFinder{
 		CloudtrailClient: cloudtrail.NewFromConfig(awsConfig),
-		DataStoreId:      "4cee9f76-991a-46fc-9c49-7ab50d19d83d", // TODO
 		Options: &logs.CloudTrailEventLookupOptions{
 			//WaitAtLeast:         30 * time.Second,
 			WaitAtMost:                  10 * time.Minute,
@@ -76,10 +75,14 @@ func (m *RunCommand) Do() error {
 	if err != nil {
 		return err
 	}
+
+	//TODO critical: catch ctrl+c and cleanup if appropriate
 	defer detonator.CleanUp() // Note: cleanup needs to be done after we're done searching for logs
 
 	log.Info("Stratus Red Team attack technique successfully detonated")
 	var allEvents []map[string]interface{}
+
+	log.Info("Searching for CloudTrail logs...")
 	results, err := cloudtrailLogs.FindLogs(detonation)
 	if err != nil {
 		return err

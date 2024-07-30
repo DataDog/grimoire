@@ -4,27 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/cloudtrail"
-	"github.com/aws/aws-sdk-go-v2/service/cloudtrail/types"
 	"github.com/datadog/grimoire/pkg/grimoire/detonators"
+	utils "github.com/datadog/grimoire/pkg/grimoire/utils"
 	log "github.com/sirupsen/logrus"
 	"strings"
 	"time"
 )
 
-type CloudTrailDataStore struct {
+type CloudTrailEventsFinder struct {
 	CloudtrailClient *cloudtrail.Client
-	DataStoreId      string
 	Options          *CloudTrailEventLookupOptions
 }
-
-type UserAgentMatchType int
-
-const (
-	UserAgentMatchTypeExact UserAgentMatchType = iota
-	UserAgentMatchTypePartial
-)
 
 type CloudTrailEventLookupOptions struct {
 	// Timeout to find the *first* CloudTrail event
@@ -45,9 +36,6 @@ type CloudTrailEventLookupOptions struct {
 
 	// Exclude specific CloudTrail events from the search
 	ExcludeEvents []string
-
-	// UserAgentMatchType is the type of match to use when filtering by UserAgent
-	UserAgentMatchType UserAgentMatchType
 }
 
 type CloudTrailResult struct {
@@ -55,43 +43,22 @@ type CloudTrailResult struct {
 	Error           error
 }
 
-func (m *CloudTrailDataStore) FindLogs(detonation *detonators.DetonationInfo) (chan *CloudTrailResult, error) {
+func (m *CloudTrailEventsFinder) FindLogs(detonation *detonators.DetonationInfo) (chan *CloudTrailResult, error) {
 	if m.Options.WaitAtLeast.Seconds() > m.Options.WaitAtMost.Seconds() {
 		return nil, fmt.Errorf("invalid Options ('wait at least' should be lower or equal to 'wait at most')")
 	}
 
-	exclusion := ""
-	if len(m.Options.ExcludeEvents) > 0 {
-		exclusion = fmt.Sprintf("AND eventName NOT IN (%s)", strings.Join(m.Options.ExcludeEvents, ","))
-	}
-
-	var userAgentQuery = ""
-	switch m.Options.UserAgentMatchType {
-	case UserAgentMatchTypeExact:
-		userAgentQuery = fmt.Sprintf("userAgent = '%s'", detonation.DetonationID)
-	case UserAgentMatchTypePartial:
-		userAgentQuery = fmt.Sprintf("userAgent LIKE '%%%s%%'", detonation.DetonationID)
-	}
-
-	query := fmt.Sprintf(
-		`SELECT eventjson FROM %s WHERE %s %s ORDER BY eventTime ASC`,
-		m.DataStoreId,
-		userAgentQuery,
-		exclusion,
-	)
-	log.Info("Looking for CloudTrail logs in CloudTrail Lake...")
-	log.Debug(query)
-
-	return m.findEvents(query)
+	return m.findEventsWithCloudTrail(detonation)
 }
 
-func (m *CloudTrailDataStore) findEvents(query string) (chan *CloudTrailResult, error) {
+func (m *CloudTrailEventsFinder) findEventsWithCloudTrail(detonation *detonators.DetonationInfo) (chan *CloudTrailResult, error) {
 	results := make(chan *CloudTrailResult) //TODO split result and error channels?
-	go m.findEventsAsync(query, results)
+	go m.findEventsWithCloudTrailAsync(detonation, results)
 	return results, nil
 }
 
-func (m *CloudTrailDataStore) findEventsAsync(query string, results chan *CloudTrailResult) {
+func (m *CloudTrailEventsFinder) findEventsWithCloudTrailAsync(detonation *detonators.DetonationInfo, results chan *CloudTrailResult) {
+	defer close(results)
 	defer close(results)
 
 	var allEvents = []map[string]interface{}{}
@@ -101,9 +68,9 @@ func (m *CloudTrailDataStore) findEventsAsync(query string, results chan *CloudT
 
 	// We look for events as long as we didn't reach the deadline
 	for time.Now().Before(deadline) {
-		events, err := m.runQuery(query)
+		events, err := m.lookupEvents(detonation)
 		if err != nil {
-			results <- &CloudTrailResult{Error: fmt.Errorf("unable to run CloudTrail Lake query: %w", err)}
+			results <- &CloudTrailResult{Error: fmt.Errorf("unable to run CloudTrail LookupEvents: %w", err)}
 			return
 		}
 		if len(events) > 0 {
@@ -119,7 +86,7 @@ func (m *CloudTrailDataStore) findEventsAsync(query string, results chan *CloudT
 				//
 				// Note: The loop will continue as long as we keep finding new CloudTrail events
 				newDeadline := time.Now().Add(m.Options.DebounceTimeAfterFirstEvent)
-				deadline = latest(newDeadline, waitAtLeastUntil)
+				deadline = utils.Latest(newDeadline, waitAtLeastUntil)
 				for _, newEvent := range newEventsFound {
 					log.Debug("Publishing new event to asynchronous channel")
 					results <- &CloudTrailResult{CloudTrailEvent: newEvent}
@@ -143,57 +110,53 @@ func (m *CloudTrailDataStore) findEventsAsync(query string, results chan *CloudT
 	}
 }
 
-// runQuery runs a specific CloudTrail Lake query, waits for the result sand returns it
-func (m *CloudTrailDataStore) runQuery(query string) ([]map[string]interface{}, error) {
-	log.Debugf("Running CloudTrail Lake query %s", query)
-	result, err := m.CloudtrailClient.StartQuery(context.Background(), &cloudtrail.StartQueryInput{
-		QueryStatement: aws.String(query),
+func (m *CloudTrailEventsFinder) lookupEvents(detonation *detonators.DetonationInfo) ([]map[string]interface{}, error) {
+	paginator := cloudtrail.NewLookupEventsPaginator(m.CloudtrailClient, &cloudtrail.LookupEventsInput{
+		StartTime: &detonation.StartTime,
+		EndTime:   &detonation.EndTime,
 	})
-	if err != nil {
-		return nil, fmt.Errorf("unable to run CloudTrail Lake query '%s': %w", query, err)
-	}
 
-	// Note: We assume that any CloudTrail Lake query eventually finishes
-	// TODO: use contexts with the proper deadline
-	for {
-		queryResults, err := m.CloudtrailClient.GetQueryResults(context.Background(), &cloudtrail.GetQueryResultsInput{
-			QueryId: result.QueryId,
-		})
+	log.WithField("start_time", detonation.StartTime).
+		WithField("end_time", detonation.EndTime).
+		Debugf("Looking for CloudTrail events with using LookupEvents and detonation ID %s", detonation.DetonationID)
+
+	events := []map[string]interface{}{}
+
+	for paginator.HasMorePages() {
+		logs, err := paginator.NextPage(context.Background())
 		if err != nil {
-			return nil, fmt.Errorf("unable to retrieve CloudTrail Lake query results: %w", err)
+			return nil, fmt.Errorf("unable to retrieve CloudTrail events: %w", err)
 		}
-
-		queryStatus := queryResults.QueryStatus
-		if queryStatus == types.QueryStatusQueued || queryStatus == types.QueryStatusRunning {
-			// The query is still running
-			time.Sleep(1 * time.Second)
-			log.Debug("Query is still running...")
-			continue
-		} else if queryStatus == types.QueryStatusFailed || queryStatus == types.QueryStatusCancelled {
-			// The query failed or was cancelled for some reason
-			return nil, fmt.Errorf("failed running CloudTrail Lake query: status %s", queryStatus)
-		} else if queryStatus == types.QueryStatusFinished {
-			log.Debug("Query finished, gathering results")
-			// The query is done!
-			return flatten(queryResults.QueryResultRows), nil
-		} else {
-			return nil, fmt.Errorf("unexpected CloudTrail Lake query status: %s", queryStatus)
+		if len(logs.Events) > 0 {
+			log.Debugf("Found %d CloudTrail events", len(logs.Events))
+			for i := range logs.Events {
+				event := logs.Events[i].CloudTrailEvent
+				var parsed map[string]interface{}
+				json.Unmarshal([]byte(*event), &parsed)
+				eventName := parsed["eventName"].(string)
+				if strings.Contains(*event, detonation.DetonationID) {
+					if !m.isEventNameExcluded(eventName) {
+						log.Debugf("Found CloudTrail event %s matching detonation UID", eventName)
+						events = append(events, parsed)
+					} else {
+						log.Debugf("Found CloudTrail event %s matching detonation UID, but ignoring as it's on the exclude list", eventName)
+					}
+				} else {
+					log.Debugf("Found CloudTrail event %s but it does not match detonation UID", eventName)
+				}
+			}
 		}
 	}
+	return events, nil
 }
 
-// Utility methods
-func flatten(events [][]map[string]string) []map[string]interface{} {
-	flattened := []map[string]interface{}{}
-	for i := range events {
-		for j := range events[i] {
-			var parsed map[string]interface{}
-			json.Unmarshal([]byte(events[i][j]["eventjson"]), &parsed)
-			flattened = append(flattened, parsed)
+func (m *CloudTrailEventsFinder) isEventNameExcluded(name string) bool {
+	for i := range m.Options.ExcludeEvents {
+		if m.Options.ExcludeEvents[i] == name {
+			return true
 		}
 	}
-
-	return flattened
+	return false
 }
 
 func dedupeAndAppend(allEvents []map[string]interface{}, newEvents []map[string]interface{}) ([]map[string]interface{}, []*map[string]interface{}) {
@@ -217,12 +180,4 @@ func dedupeAndAppend(allEvents []map[string]interface{}, newEvents []map[string]
 	}
 
 	return allEvents, actualNewEvents
-}
-
-// latest returns the time.Time which is the further away
-func latest(first time.Time, second time.Time) time.Time {
-	if first.After(second) {
-		return first
-	}
-	return second
 }
