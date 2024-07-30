@@ -12,6 +12,13 @@ import (
 	"time"
 )
 
+type UserAgentMatchType int
+
+const (
+	UserAgentMatchTypeExact UserAgentMatchType = iota
+	UserAgentMatchTypePartial
+)
+
 type CloudTrailEventsFinder struct {
 	CloudtrailClient *cloudtrail.Client
 	Options          *CloudTrailEventLookupOptions
@@ -36,6 +43,9 @@ type CloudTrailEventLookupOptions struct {
 
 	// Exclude specific CloudTrail events from the search
 	ExcludeEvents []string
+
+	// UserAgentMatchType is the type of match to use when filtering by UserAgent
+	UserAgentMatchType UserAgentMatchType
 }
 
 type CloudTrailResult struct {
@@ -133,7 +143,7 @@ func (m *CloudTrailEventsFinder) lookupEvents(ctx context.Context, detonation *d
 				var parsed map[string]interface{}
 				json.Unmarshal([]byte(*event), &parsed)
 				eventName := parsed["eventName"].(string)
-				if strings.Contains(*event, detonation.DetonationID) {
+				if m.eventsMatchesDetonation(parsed, detonation) {
 					if !m.isEventNameExcluded(eventName) {
 						log.Debugf("Found CloudTrail event %s matching detonation UID", eventName)
 						events = append(events, parsed)
@@ -156,6 +166,19 @@ func (m *CloudTrailEventsFinder) isEventNameExcluded(name string) bool {
 		}
 	}
 	return false
+}
+
+func (m *CloudTrailEventsFinder) eventsMatchesDetonation(event map[string]interface{}, detonation *detonators.DetonationInfo) bool {
+	userAgent := event["userAgent"].(string)
+
+	switch m.Options.UserAgentMatchType {
+	case UserAgentMatchTypeExact:
+		return strings.ToLower(userAgent) == strings.ToLower(detonation.DetonationID)
+	case UserAgentMatchTypePartial:
+		return strings.Contains(userAgent, detonation.DetonationID)
+	default:
+		return false
+	}
 }
 
 func dedupeAndAppend(allEvents []map[string]interface{}, newEvents []map[string]interface{}) ([]map[string]interface{}, []*map[string]interface{}) {

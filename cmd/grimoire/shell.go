@@ -104,6 +104,7 @@ func (m *ShellCommand) Do() error {
 			WaitAtMost:                  10 * time.Minute,
 			SearchInterval:              15 * time.Second,
 			DebounceTimeAfterFirstEvent: 120 * time.Second,
+			UserAgentMatchType:          logs.UserAgentMatchTypePartial,
 		},
 	}
 
