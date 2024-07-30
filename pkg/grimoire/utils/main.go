@@ -43,10 +43,6 @@ func AppendToJsonFileArray(outputFile string, payload map[string]interface{}) er
 		return nil
 	}
 
-	if outputFile == "/tmp/ct" {
-		return fmt.Errorf("testing")
-	}
-
 	// Read file contents and parse the JSON
 	var events []map[string]interface{}
 	inputBytes, err := os.ReadFile(outputFile)

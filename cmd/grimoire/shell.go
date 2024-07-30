@@ -80,13 +80,15 @@ func (m *ShellCommand) Do() error {
 	screen.Clear()
 
 	startTime := time.Now()
+	grimoireUserAgent := fmt.Sprintf("grimoire_%s", detonationUuid)
 	cmd := exec.CommandContext(ctx, os.Getenv("SHELL"))
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Env = append(
 		os.Environ(),
-		fmt.Sprintf("AWS_EXECUTION_ENV=grimoire_%s", detonationUuid),
+		fmt.Sprintf("AWS_EXECUTION_ENV=%s", grimoireUserAgent),
+		fmt.Sprintf("GRIMOIRE_DETONATION_ID=%s", detonationUuid), // generic environment variable to allow the user to pass it further if needed
 	)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("unable to run shell: %v", err)

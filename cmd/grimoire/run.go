@@ -94,6 +94,8 @@ func (m *RunCommand) Do() error {
 	}
 
 	defer m.Exit()
+	//TODO: should we cleanup the attack technique as soon as it's been detonated, in parallel to searching for logs?
+	// if yes, we should make sure the program doesn't exit before cleanup is complete
 
 	log.Info("Stratus Red Team attack technique successfully detonated")
 	var allEvents []map[string]interface{}
@@ -116,12 +118,12 @@ func (m *RunCommand) Do() error {
 					cancel() //TODO: is this the right thing to do?
 					return
 				}
-				log.Printf("%s: %s", (*evt.CloudTrailEvent)["eventTime"], (*evt.CloudTrailEvent)["eventName"])
+
 				allEvents = append(allEvents, *evt.CloudTrailEvent)
-				err := utils.AppendToJsonFileArray(m.OutputFile, *evt.CloudTrailEvent)
-				if err != nil {
-					log.Errorf("unable to write CloudTrail event to %s: %v", m.OutputFile, err)
+				if err := m.handleNewEvent(evt.CloudTrailEvent); err != nil {
+					log.Errorf(err.Error())
 					cancel() //TODO: is this the right thing to do?
+					return
 				}
 
 			case <-ctx.Done():
@@ -137,6 +139,15 @@ func (m *RunCommand) Do() error {
 		return fmt.Errorf("unable to write events to file: %w", err)
 	}
 
+	return nil
+}
+
+func (m *RunCommand) handleNewEvent(event *map[string]interface{}) error {
+	log.Printf("Found new CloudTrail event generated on %s UTC: %s", (*event)["eventTime"], (*event)["eventName"])
+	err := utils.AppendToJsonFileArray(m.OutputFile, *event)
+	if err != nil {
+		return fmt.Errorf("unable to write CloudTrail event to %s: %v", m.OutputFile, err)
+	}
 	return nil
 }
 

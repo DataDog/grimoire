@@ -75,6 +75,8 @@ func (m *CloudTrailEventsFinder) findEventsWithCloudTrailAsync(ctx context.Conte
 	waitAtLeastUntil := now.Add(m.Options.WaitAtLeast)
 	deadline := now.Add(m.Options.WaitAtMost)
 
+	log.Debugf("Deadline for finding CloudTrail events is %s", deadline)
+
 	// We look for events as long as we didn't reach the deadline
 	for time.Now().Before(deadline) {
 		events, err := m.lookupEvents(ctx, detonation)
@@ -88,6 +90,7 @@ func (m *CloudTrailEventsFinder) findEventsWithCloudTrailAsync(ctx context.Conte
 			allEvents, newEventsFound = dedupeAndAppend(allEvents, events)
 
 			if len(newEventsFound) > 0 {
+				log.Debugf("Found %d new CloudTrail events", len(newEventsFound))
 				// At this point, we found at least CloudTrail event
 				// We now want to set a new "deadline", i.e. when we'll stop searching for further events
 				// Set this new deadline, honoring both "wait at least X" and "wait for Y seconds after new events" constraints
@@ -95,6 +98,7 @@ func (m *CloudTrailEventsFinder) findEventsWithCloudTrailAsync(ctx context.Conte
 				// Note: The loop will continue as long as we keep finding new CloudTrail events
 				newDeadline := time.Now().Add(m.Options.DebounceTimeAfterFirstEvent)
 				deadline = utils.Latest(newDeadline, waitAtLeastUntil)
+				log.Debugf("New deadline for finding CloudTrail events is %s", deadline)
 				for _, newEvent := range newEventsFound {
 					log.Debug("Publishing new event to asynchronous channel")
 					results <- &CloudTrailResult{CloudTrailEvent: newEvent}
@@ -102,6 +106,7 @@ func (m *CloudTrailEventsFinder) findEventsWithCloudTrailAsync(ctx context.Conte
 
 				// If we reached the max number of events to wait for, return as soon as possible
 				if m.Options.WaitAtMostNumberOfEvents > 0 && len(allEvents) >= m.Options.WaitAtMostNumberOfEvents {
+					log.Debugf("Reached %d events, stopping search", m.Options.WaitAtMostNumberOfEvents)
 					return
 				}
 			} else {
@@ -150,7 +155,8 @@ func (m *CloudTrailEventsFinder) lookupEvents(ctx context.Context, detonation *d
 						log.Debugf("Found CloudTrail event %s matching detonation UID, but ignoring as it's on the exclude list", eventName)
 					}
 				} else {
-					log.Debugf("Found CloudTrail event %s but it does not match detonation UID", eventName)
+					// logging disabled for now, was noisy
+					//log.Debugf("Found CloudTrail event %s but it does not match detonation UID", eventName)
 				}
 			}
 		}
