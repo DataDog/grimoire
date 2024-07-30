@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -10,7 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/datadog/grimoire/pkg/grimoire/detonators"
 	"github.com/datadog/grimoire/pkg/grimoire/logs"
-	grimoire "github.com/datadog/grimoire/pkg/grimoire/utils"
+	utils "github.com/datadog/grimoire/pkg/grimoire/utils"
 	"github.com/inancgumus/screen"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -55,8 +54,7 @@ func (m *ShellCommand) Do() error {
 		case <-sigChan:
 			cancel()
 			close(sigChan)
-			fmt.Println("Cancelling!")
-			//TODO: Cancel in-progress CloudTrail SQL Lake queries
+			log.Info("Exiting Grimoire.")
 			os.Exit(0)
 		case <-ctx.Done():
 		}
@@ -68,7 +66,7 @@ func (m *ShellCommand) Do() error {
 		}
 	}
 
-	detonationUuid := grimoire.NewDetonationID()
+	detonationUuid := utils.NewDetonationID()
 	awsConfig, _ := config.LoadDefaultConfig(context.Background())
 
 	// Ensure that the user is already authenticated to AWS
@@ -115,7 +113,8 @@ func (m *ShellCommand) Do() error {
 		EndTime:      endTime,
 	}
 
-	eventsChannel, err := cloudtrailLogs.FindLogs(detonationInfo)
+	log.Info("Searching for CloudTrail logs...")
+	eventsChannel, err := cloudtrailLogs.FindLogs(context.Background(), detonationInfo)
 	if err != nil {
 		return fmt.Errorf("unable to search for CloudTrail events: %v", err)
 	}
@@ -127,51 +126,9 @@ func (m *ShellCommand) Do() error {
 		}
 
 		log.Infof("Found event: %s", (*evt.CloudTrailEvent)["eventName"])
-		if err := m.appendToFile(*evt.CloudTrailEvent); err != nil {
+		if err := utils.AppendToJsonFileArray(m.outputFile, *evt.CloudTrailEvent); err != nil {
 			log.Errorf("unable to append CloudTrail event to output file: %v", err)
 		}
-	}
-
-	return nil
-}
-
-func (m *ShellCommand) appendToFile(event map[string]interface{}) error {
-	if m.outputFile == "" {
-		return nil // nothing to do
-	}
-	if m.outputFile == "-" {
-		outputBytes, err := json.MarshalIndent(event, "", "   ")
-		if err != nil {
-			return err
-		}
-		fmt.Println(string(outputBytes))
-		return nil
-	}
-
-	inputBytes, err := os.ReadFile(m.outputFile)
-	if err != nil {
-		return err
-	}
-	var events []map[string]interface{}
-	err = json.Unmarshal(inputBytes, &events)
-	if err != nil {
-		return err
-	}
-	events = append(events, event)
-
-	outputBytes, err := json.MarshalIndent(events, "", "   ")
-	if err != nil {
-		return err
-	}
-
-	file, err := os.OpenFile(m.outputFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	_, err = file.Write(outputBytes)
-	if err != nil {
-		return err
 	}
 
 	return nil

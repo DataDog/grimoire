@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/cloudtrail"
 	"github.com/datadog/grimoire/pkg/grimoire/detonators"
 	"github.com/datadog/grimoire/pkg/grimoire/logs"
+	utils "github.com/datadog/grimoire/pkg/grimoire/utils"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"os"
@@ -65,17 +66,27 @@ func (m *RunCommand) Do() error {
 		},
 	}
 
+	if m.OutputFile != "" {
+		if err := os.WriteFile(m.OutputFile, []byte("[]"), 0600); err != nil {
+			return fmt.Errorf("unable to create output file %s: %v", m.OutputFile, err)
+		}
+	}
+
 	log.Infof("Detonating %s", m.StratusRedTeamDetonator.AttackTechnique)
 	detonation, err := m.StratusRedTeamDetonator.Detonate()
 	if err != nil {
 		return err
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-sigChan
 		log.Info("Exiting Grimoire cleanly, don't press Ctrl+C again")
+		cancel()
 		time.Sleep(1 * time.Minute)
 		if err := m.Exit(); err != nil {
 			log.Errorf("unable to exit Grimoire cleanly: %v", err)
@@ -90,25 +101,45 @@ func (m *RunCommand) Do() error {
 	var allEvents []map[string]interface{}
 
 	log.Info("Searching for CloudTrail logs...")
-	results, err := cloudtrailLogs.FindLogs(detonation)
+	results, err := cloudtrailLogs.FindLogs(ctx, detonation)
 	if err != nil {
 		return err
 	}
 
-	for evt := range results {
-		if evt.Error != nil {
-			//TODO: should we write the events we have so far to the output file before exiting?
-			return evt.Error
-		}
-		log.Infof("%s: %s", (*evt.CloudTrailEvent)["eventTime"], (*evt.CloudTrailEvent)["eventName"])
-		allEvents = append(allEvents, *evt.CloudTrailEvent)
+	go func() {
+		for {
+			select {
+			case evt, ok := <-results:
+				if !ok {
+					return // Channel closed, exit the goroutine
+				}
+				if evt.Error != nil {
+					log.Printf("Error processing event: %v", evt.Error)
+					return
+				}
+				log.Printf("%s: %s", (*evt.CloudTrailEvent)["eventTime"], (*evt.CloudTrailEvent)["eventName"])
+				allEvents = append(allEvents, *evt.CloudTrailEvent)
+				err := utils.AppendToJsonFileArray(m.OutputFile, *evt.CloudTrailEvent)
+				if err != nil {
+					log.Errorf("unable to write CloudTrail event to %s: %v", m.OutputFile, err)
+					return
+				}
 
-		//TODO stream events to file
-	}
+				//TODO?
+
+			case <-ctx.Done():
+				log.Debug("Stopping event processing due to context cancellation")
+				return
+			}
+		}
+	}()
+
+	<-ctx.Done()
 
 	if err := m.writeToFile(allEvents); err != nil {
 		return fmt.Errorf("unable to write events to file: %w", err)
 	}
+
 	return nil
 }
 

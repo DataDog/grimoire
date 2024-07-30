@@ -43,21 +43,21 @@ type CloudTrailResult struct {
 	Error           error
 }
 
-func (m *CloudTrailEventsFinder) FindLogs(detonation *detonators.DetonationInfo) (chan *CloudTrailResult, error) {
+func (m *CloudTrailEventsFinder) FindLogs(ctx context.Context, detonation *detonators.DetonationInfo) (chan *CloudTrailResult, error) {
 	if m.Options.WaitAtLeast.Seconds() > m.Options.WaitAtMost.Seconds() {
 		return nil, fmt.Errorf("invalid Options ('wait at least' should be lower or equal to 'wait at most')")
 	}
 
-	return m.findEventsWithCloudTrail(detonation)
+	return m.findEventsWithCloudTrail(ctx, detonation)
 }
 
-func (m *CloudTrailEventsFinder) findEventsWithCloudTrail(detonation *detonators.DetonationInfo) (chan *CloudTrailResult, error) {
+func (m *CloudTrailEventsFinder) findEventsWithCloudTrail(ctx context.Context, detonation *detonators.DetonationInfo) (chan *CloudTrailResult, error) {
 	results := make(chan *CloudTrailResult) //TODO split result and error channels?
-	go m.findEventsWithCloudTrailAsync(detonation, results)
+	go m.findEventsWithCloudTrailAsync(ctx, detonation, results)
 	return results, nil
 }
 
-func (m *CloudTrailEventsFinder) findEventsWithCloudTrailAsync(detonation *detonators.DetonationInfo, results chan *CloudTrailResult) {
+func (m *CloudTrailEventsFinder) findEventsWithCloudTrailAsync(ctx context.Context, detonation *detonators.DetonationInfo, results chan *CloudTrailResult) {
 	defer close(results)
 
 	var allEvents = []map[string]interface{}{}
@@ -67,7 +67,7 @@ func (m *CloudTrailEventsFinder) findEventsWithCloudTrailAsync(detonation *deton
 
 	// We look for events as long as we didn't reach the deadline
 	for time.Now().Before(deadline) {
-		events, err := m.lookupEvents(detonation)
+		events, err := m.lookupEvents(ctx, detonation)
 		if err != nil {
 			results <- &CloudTrailResult{Error: fmt.Errorf("unable to run CloudTrail LookupEvents: %w", err)}
 			return
@@ -109,7 +109,7 @@ func (m *CloudTrailEventsFinder) findEventsWithCloudTrailAsync(detonation *deton
 	}
 }
 
-func (m *CloudTrailEventsFinder) lookupEvents(detonation *detonators.DetonationInfo) ([]map[string]interface{}, error) {
+func (m *CloudTrailEventsFinder) lookupEvents(ctx context.Context, detonation *detonators.DetonationInfo) ([]map[string]interface{}, error) {
 	paginator := cloudtrail.NewLookupEventsPaginator(m.CloudtrailClient, &cloudtrail.LookupEventsInput{
 		StartTime: &detonation.StartTime,
 		EndTime:   &detonation.EndTime,
@@ -122,7 +122,7 @@ func (m *CloudTrailEventsFinder) lookupEvents(detonation *detonators.DetonationI
 	events := []map[string]interface{}{}
 
 	for paginator.HasMorePages() {
-		logs, err := paginator.NextPage(context.Background())
+		logs, err := paginator.NextPage(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("unable to retrieve CloudTrail events: %w", err)
 		}
