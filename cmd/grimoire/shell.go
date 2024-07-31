@@ -11,7 +11,6 @@ import (
 	"github.com/datadog/grimoire/pkg/grimoire/detonators"
 	"github.com/datadog/grimoire/pkg/grimoire/logs"
 	utils "github.com/datadog/grimoire/pkg/grimoire/utils"
-	"github.com/inancgumus/screen"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"os"
@@ -22,11 +21,15 @@ import (
 )
 
 type ShellCommand struct {
-	outputFile string
+	OutputFile   string
+	CommandToRun string
+	ScriptToRun  string
 }
 
 func NewShellCommand() *cobra.Command {
 	var outputFile string
+	var commandToRun string
+	var scriptToRun string
 
 	shellCmd := &cobra.Command{
 		Use:          "shell",
@@ -34,17 +37,30 @@ func NewShellCommand() *cobra.Command {
 		Example:      "TODO",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			command := ShellCommand{
-				outputFile: outputFile,
+				OutputFile:   outputFile,
+				CommandToRun: commandToRun,
+				ScriptToRun:  scriptToRun,
+			}
+			if err := command.Validate(); err != nil {
+				return err
 			}
 			return command.Do()
 		},
 	}
 
 	shellCmd.Flags().StringVarP(&outputFile, "output", "o", "", "TODO")
+	shellCmd.Flags().StringVarP(&commandToRun, "command", "c", "", "TODO")
+	shellCmd.Flags().StringVarP(&scriptToRun, "script", "", "", "TODO")
 
 	return shellCmd
 }
 
+func (m *ShellCommand) Validate() error {
+	if m.CommandToRun != "" && m.ScriptToRun != "" {
+		return fmt.Errorf("only one of 'command' or 'script' can be specified")
+	}
+	return nil
+}
 func (m *ShellCommand) Do() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	sigChan := make(chan os.Signal)
@@ -60,7 +76,7 @@ func (m *ShellCommand) Do() error {
 		}
 	}()
 
-	if err := utils.CreateOrTruncateJSONFile(m.outputFile); err != nil {
+	if err := utils.CreateOrTruncateJSONFile(m.OutputFile); err != nil {
 		return err
 	}
 
@@ -70,18 +86,24 @@ func (m *ShellCommand) Do() error {
 	// Ensure that the user is already authenticated to AWS
 	m.ensureAuthenticatedToAws(awsConfig)
 
-	log.Info("Grimoire will now run your shell and automatically inject a unique identifier to your HTTP user agent when using the AWS CLI")
-	log.Info("You can use the AWS CLI as usual. Press Ctrl+D or type 'exit' to return to Grimoire.")
-	log.Info("When you exit the shell, Grimoire will look for the CloudTrail events that your commands have generated.")
-	log.Info("Press ENTER to continue")
-	if _, err := fmt.Scanln(); err != nil {
-		return err
+	if m.isInteractiveMode() {
+		log.Info("Grimoire will now run your shell and automatically inject a unique identifier to your HTTP user agent when using the AWS CLI")
+		log.Info("You can use the AWS CLI as usual. Press Ctrl+D or type 'exit' to return to Grimoire.")
+		log.Info("When you exit the shell, Grimoire will look for the CloudTrail events that your commands have generated.")
+		log.Info("Press ENTER to continue")
+		if _, err := fmt.Scanln(); err != nil {
+			return err
+		}
+	} else if m.CommandToRun != "" {
+		log.Infof("Running detonation command: %s", m.CommandToRun)
+	} else if m.ScriptToRun != "" {
+		log.Infof("Running detonation script: %s", m.ScriptToRun)
 	}
-	screen.Clear()
 
 	startTime := time.Now()
 	grimoireUserAgent := fmt.Sprintf("grimoire_%s", detonationUuid)
-	cmd := exec.CommandContext(ctx, os.Getenv("SHELL"))
+	commandToRun, args := m.getCommandToRun()
+	cmd := exec.CommandContext(ctx, commandToRun, args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -94,9 +116,10 @@ func (m *ShellCommand) Do() error {
 		return fmt.Errorf("unable to run shell: %v", err)
 	}
 	endTime := time.Now()
-	screen.Clear()
-	screen.MoveTopLeft()
-	log.Infof("Welcome back to Grimoire!")
+
+	if m.isInteractiveMode() {
+		log.Infof("Welcome back to Grimoire!")
+	}
 
 	cloudtrailLogs := &logs.CloudTrailEventsFinder{
 		CloudtrailClient: cloudtrail.NewFromConfig(awsConfig),
@@ -127,7 +150,7 @@ func (m *ShellCommand) Do() error {
 		}
 
 		log.Infof("Found event: %s", (*evt.CloudTrailEvent)["eventName"])
-		if err := utils.AppendToJsonFileArray(m.outputFile, *evt.CloudTrailEvent); err != nil {
+		if err := utils.AppendToJsonFileArray(m.OutputFile, *evt.CloudTrailEvent); err != nil {
 			log.Errorf("unable to append CloudTrail event to output file: %v", err)
 		}
 	}
@@ -158,4 +181,19 @@ func (m *ShellCommand) isExecutionError(err error) bool {
 	}
 
 	return true
+}
+
+func (m *ShellCommand) getCommandToRun() (string, []string) {
+	shell := os.Getenv("SHELL")
+	if m.CommandToRun != "" {
+		return shell, []string{"-c", m.CommandToRun}
+	} else if m.ScriptToRun != "" {
+		return shell, []string{m.ScriptToRun}
+	} else {
+		return shell, []string{}
+	}
+}
+
+func (m *ShellCommand) isInteractiveMode() bool {
+	return m.CommandToRun == "" && m.ScriptToRun == ""
 }
