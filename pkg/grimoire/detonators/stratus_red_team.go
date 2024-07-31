@@ -49,7 +49,6 @@ func (m *StratusRedTeamDetonator) Detonate() (*DetonationInfo, error) {
 }
 
 func (m *StratusRedTeamDetonator) CleanUp() error {
-	log.Infof("Cleaning up Stratus Red Team attack technique %s", m.AttackTechnique)
 	return m.StratusRunner.CleanUp()
 }
 

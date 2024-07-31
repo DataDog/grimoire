@@ -3,6 +3,7 @@ package logs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/service/cloudtrail"
 	"github.com/datadog/grimoire/pkg/grimoire/detonators"
@@ -62,8 +63,36 @@ func (m *CloudTrailEventsFinder) FindLogs(ctx context.Context, detonation *deton
 }
 
 func (m *CloudTrailEventsFinder) findEventsWithCloudTrail(ctx context.Context, detonation *detonators.DetonationInfo) (chan *CloudTrailResult, error) {
-	results := make(chan *CloudTrailResult) //TODO split result and error channels?
-	go m.findEventsWithCloudTrailAsync(ctx, detonation, results)
+	results := make(chan *CloudTrailResult)
+	resultsInternal := make(chan *CloudTrailResult)
+
+	// findEventsWithCloudTrailAsync has a long-running for loop that will be stopped when the context is cancelled
+	// To achieve this, we "proxy" the results through another channel, and close it when the context is cancelled
+	// This allows to quickly abort whenever the parent context is cancelled (for instance on a Ctrl+C)
+	// Otherwise we'd have to check inside the loop and there could be a delay of several seconds
+
+	go m.findEventsWithCloudTrailAsync(ctx, detonation, resultsInternal)
+
+	go func() {
+		defer close(results)
+		for {
+			select {
+			case <-ctx.Done():
+				// Parent context cancelled
+				log.Debug("CloudTrailEventFinder identified that the parent context was cancelled, returning")
+				results <- &CloudTrailResult{Error: fmt.Errorf("parent context was cancelled: %w", ctx.Err())}
+				return
+
+			case result, ok := <-resultsInternal:
+				// We got a result, forward it to the parent channel
+				if !ok {
+					return // no more results
+				}
+				results <- result
+			}
+		}
+	}()
+
 	return results, nil
 }
 
@@ -124,6 +153,10 @@ func (m *CloudTrailEventsFinder) findEventsWithCloudTrailAsync(ctx context.Conte
 }
 
 func (m *CloudTrailEventsFinder) lookupEvents(ctx context.Context, detonation *detonators.DetonationInfo) ([]map[string]interface{}, error) {
+	// Check if the parent context was cancelled to avoid awkwardly continuing the search when the program is exiting
+	if err := ctx.Err(); err != nil && errors.Is(err, context.Canceled) {
+		return nil, context.Canceled
+	}
 	paginator := cloudtrail.NewLookupEventsPaginator(m.CloudtrailClient, &cloudtrail.LookupEventsInput{
 		StartTime: &detonation.StartTime,
 		EndTime:   &detonation.EndTime,

@@ -14,6 +14,9 @@ import (
 	"github.com/spf13/cobra"
 	"os"
 	"os/signal"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -21,6 +24,11 @@ import (
 type RunCommand struct {
 	StratusRedTeamDetonator *detonators.StratusRedTeamDetonator
 	OutputFile              string
+	cleanupWg               sync.WaitGroup
+	cleanupMutex            sync.Mutex
+	cleanupRunning          atomic.Bool
+	cleanupSucceeded        atomic.Bool
+	wasCtrlCPressed         atomic.Bool
 }
 
 func NewRunCommand() *cobra.Command {
@@ -58,7 +66,6 @@ func (m *RunCommand) Do() error {
 	cloudtrailLogs := &logs.CloudTrailEventsFinder{
 		CloudtrailClient: cloudtrail.NewFromConfig(awsConfig),
 		Options: &logs.CloudTrailEventLookupOptions{
-			//WaitAtLeast:         30 * time.Second,
 			WaitAtMost:                  10 * time.Minute,
 			SearchInterval:              5 * time.Second,
 			DebounceTimeAfterFirstEvent: 120 * time.Second,
@@ -75,26 +82,31 @@ func (m *RunCommand) Do() error {
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-sigChan
-		log.Info("Exiting Grimoire cleanly, don't press Ctrl+C again")
-		cancel()
-		time.Sleep(1 * time.Minute)
-		if err := m.Exit(); err != nil {
-			log.Errorf("unable to exit Grimoire cleanly: %v", err)
-			os.Exit(1)
-		}
-		os.Exit(0)
-	}()
 
 	detonation, err := m.StratusRedTeamDetonator.Detonate()
 	if err != nil {
 		return err
 	}
 
-	defer m.Exit()
-	//TODO: should we cleanup the attack technique as soon as it's been detonated, in parallel to searching for logs?
-	// if yes, we should make sure the program doesn't exit before cleanup is complete
+	// The attack has been detonated successfully
+	// We can already start cleaning up, in parallel of looking for the logs
+	// A mutex makes sure the main program doesn't exit while we're cleaning up
+	go func() {
+		log.Info("Cleaning up Stratus Red Team detonation in the background")
+		if err := m.CleanupDetonation(); err != nil {
+			// Note: Stratus Red Team Cleanup function calls the Terraform Go Wrapper, which unfortunately
+			// catches Ctrl+C signals. This means that if the user presses Ctrl+C at "the wrong time", the cleanup
+			// will fail because the Terraform Wrapper will panic and exit
+
+			// Consequently, we have some logic baked in later in this function to retry the cleanup at the end if
+			// the asynchronous cleanup failed for this specific reason
+			log.Debug("Asynchronous cleanup failed, will retry at the end of the program")
+			if strings.Contains(err.Error(), "interrupts received") {
+				log.Debug("The failure was caused by the Go terraform wrapper catching signals and panicking")
+			}
+			return
+		}
+	}()
 
 	log.Info("Stratus Red Team attack technique successfully detonated")
 	var allEvents []map[string]interface{}
@@ -105,38 +117,106 @@ func (m *RunCommand) Do() error {
 		return err
 	}
 
+	errorChan := make(chan error)
+
 	go func() {
 		for {
 			select {
+
+			// Case 1: New CloudTrail result found
 			case evt, ok := <-results:
 				if !ok {
-					return // Channel closed, exit the goroutine
+					log.Debugf("channel closed")
+					errorChan <- nil
+					return // Channel closed, exit the processing loop
 				}
+
+				// If it's an error, we exit the processing loop and ultimately exit
 				if evt.Error != nil {
 					log.Printf("Error processing event: %v", evt.Error)
-					cancel() //TODO: is this the right thing to do?
+					cancel()
+					errorChan <- evt.Error
 					return
 				}
 
+				// Otherwise, we call handleNewEvent which will stream the newly-found event appropriately
 				allEvents = append(allEvents, *evt.CloudTrailEvent)
 				if err := m.handleNewEvent(evt.CloudTrailEvent); err != nil {
+					// If processing of this event fails, we abort execution
 					log.Errorf(err.Error())
-					cancel() //TODO: is this the right thing to do?
+					cancel()
+					errorChan <- err
 					return
 				}
+
+				// We don't return here, this is the happy path where the processing loop continues
+
+			// Case 2: The user pressed Ctrl+C, we clean up and exit the program
+			/*case <-sigChan:
+			m.wasCtrlCPressed.Store(true)
+			log.Info("Exiting Grimoire cleanly, don't press Ctrl+C again")
+			cancel()
+			// NOTE: We don't clean up here again, because the cleanup starts asynchronously after the attack is detonated
+			// and the program waits for it to be completed before exiting in any case.
+			// In the future, if we have generic, non-Stratus Red Team related clean-up tasks, we should add them here.
+			errorChan <- nil
+			return*/
 
 			case <-ctx.Done():
 				log.Debug("Stopping event processing due to context cancellation")
+				errorChan <- nil
 				return
 			}
 		}
 	}()
 
-	<-ctx.Done()
+	// The code below is to handle the case where the user presses Ctrl+C several times
+	// In which case it will just print an error message
+	// In the future, we could force the exit to be faster
+	go func() {
+		for range sigChan {
+			if m.wasCtrlCPressed.CompareAndSwap(false, true) {
+				//signal.Ignore(os.Interrupt, syscall.SIGTERM)
+
+				log.Info("Exiting Grimoire cleanly, don't press Ctrl+C again")
+				cancel()
+				// NOTE: We don't clean up here again, because the cleanup starts asynchronously after the attack is detonated
+				// and the program waits for it to be completed before exiting in any case.
+				// In the future, if we have generic, non-Stratus Red Team related clean-up tasks, we should add them here.
+
+				// NOTE: We don't need to send a nil error to errorChan, because cancelling the context will reach the earlier select statement
+				// "case <-ctx.Done()" that will take care of it
+			} else {
+				log.Info("You already pressed Ctrl+C, please wait for Grimoire to exit")
+			}
+		}
+	}()
+
+	// Wait for event processing to be done, either due to a Ctrl+C either due to normal exit conditions
+	log.Debugf("Waiting for event processing to be done")
+	err = <-errorChan
+	log.Debugf("Event processing done, received a result from the error channel")
+	if err != nil {
+		return err
+	}
 
 	if err := m.writeToFile(allEvents); err != nil {
 		return fmt.Errorf("unable to write events to file: %w", err)
 	}
+
+	// Make sure we wait until cleanup is finished before exiting
+	if m.cleanupRunning.Load() == true {
+		log.Info("Waiting for Stratus Red Team attack technique clean-up to complete...")
+	}
+	m.cleanupWg.Wait()
+	if m.cleanupSucceeded.Load() == false {
+		log.Debug("First try of the detonation clean-up did not work, trying again now")
+		if err := m.CleanupDetonation(); err != nil {
+			log.Warnf("unable to cleanup Stratus Red Team attack technique %s: %v", m.StratusRedTeamDetonator.AttackTechnique, err)
+			log.Warnf("You might want to manually clean it up by running 'stratus cleanup %s'", m.StratusRedTeamDetonator.AttackTechnique)
+		}
+	}
+	log.Debug("Async cleanup finished, exiting")
 
 	return nil
 }
@@ -167,12 +247,19 @@ func (m *RunCommand) writeToFile(events []map[string]interface{}) error {
 	return nil
 }
 
-// Exits Grimoire cleanly
-// It's expected that running Ctrl+C is a pretty common use-case with Grimoire
-func (m *RunCommand) Exit() error {
-	if err := m.StratusRedTeamDetonator.CleanUp(); err != nil {
-		log.Warnf("unable to cleanup Stratus Red Team attack technique %s: %v", m.StratusRedTeamDetonator.AttackTechnique, err)
-		log.Warnf("You might want to manually clean it up by running 'stratus cleanup %s'", m.StratusRedTeamDetonator.AttackTechnique)
+func (m *RunCommand) CleanupDetonation() error {
+	m.cleanupMutex.Lock()
+	defer m.cleanupMutex.Unlock()
+	m.cleanupWg.Add(1)
+	defer m.cleanupWg.Done()
+	m.cleanupRunning.Store(true)
+	defer m.cleanupRunning.Store(false)
+
+	err := m.StratusRedTeamDetonator.CleanUp()
+	if err == nil {
+		m.cleanupSucceeded.Store(true)
 	}
-	return nil
+
+	log.Debug("Clean-up routing completed")
+	return err
 }
