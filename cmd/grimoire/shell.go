@@ -103,6 +103,7 @@ func (m *ShellCommand) Do() error {
 	startTime := time.Now()
 	grimoireUserAgent := fmt.Sprintf("grimoire_%s", detonationUuid)
 	commandToRun, args := m.getCommandToRun()
+	log.Debugf("Running command: %s %v", commandToRun, args)
 	cmd := exec.CommandContext(ctx, commandToRun, args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -188,7 +189,7 @@ func (m *ShellCommand) getCommandToRun() (string, []string) {
 	if m.CommandToRun != "" {
 		return shell, []string{"-c", m.CommandToRun}
 	} else if m.ScriptToRun != "" {
-		return shell, []string{m.ScriptToRun}
+		return shell, []string{"-x", m.ScriptToRun}
 	} else {
 		return shell, []string{}
 	}

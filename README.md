@@ -113,7 +113,12 @@ aws sts get-caller-identity
 aws iam create-user --user-name foobar
 aws iam create-access-key --user-name foobar
 
-$ grimoire shell --script /tmp/script
+$ grimoire shell --script /tmp/script.sh
+INFO[0000] Running detonation script: /tmp/script.sh
++/tmp/script.sh:1> aws sts get-caller-identity
++/tmp/script.sh:2> aws iam create-user --user-name foobar
++/tmp/script.sh:3> aws iam create-access-key --user-name foobar
+INFO[0005] Searching for CloudTrail events...
 ```
 ## Development
 
