@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -29,7 +30,6 @@ func NewShellCommand() *cobra.Command {
 
 	shellCmd := &cobra.Command{
 		Use:          "shell",
-		Short:        "TODO",
 		SilenceUsage: true,
 		Example:      "TODO",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -40,7 +40,7 @@ func NewShellCommand() *cobra.Command {
 		},
 	}
 
-	shellCmd.Flags().StringVarP(&outputFile, "output-file", "o", "", "TODO")
+	shellCmd.Flags().StringVarP(&outputFile, "output", "o", "", "TODO")
 
 	return shellCmd
 }
@@ -72,7 +72,7 @@ func (m *ShellCommand) Do() error {
 
 	log.Info("Grimoire will now run your shell and automatically inject a unique identifier to your HTTP user agent when using the AWS CLI")
 	log.Info("You can use the AWS CLI as usual. Press Ctrl+D or type 'exit' to return to Grimoire.")
-	log.Info("When you exit the shell, Grimoire will look for the CloudTrail logs that your commands have generated.")
+	log.Info("When you exit the shell, Grimoire will look for the CloudTrail events that your commands have generated.")
 	log.Info("Press ENTER to continue")
 	if _, err := fmt.Scanln(); err != nil {
 		return err
@@ -90,7 +90,7 @@ func (m *ShellCommand) Do() error {
 		fmt.Sprintf("AWS_EXECUTION_ENV=%s", grimoireUserAgent),
 		fmt.Sprintf("GRIMOIRE_DETONATION_ID=%s", detonationUuid), // generic environment variable to allow the user to pass it further if needed
 	)
-	if err := cmd.Run(); err != nil {
+	if err := cmd.Run(); err != nil && m.isExecutionError(err) {
 		return fmt.Errorf("unable to run shell: %v", err)
 	}
 	endTime := time.Now()
@@ -114,7 +114,7 @@ func (m *ShellCommand) Do() error {
 		EndTime:      endTime,
 	}
 
-	log.Info("Searching for CloudTrail logs...")
+	log.Info("Searching for CloudTrail events...")
 	eventsChannel, err := cloudtrailLogs.FindLogs(context.Background(), detonationInfo)
 	if err != nil {
 		return fmt.Errorf("unable to search for CloudTrail events: %v", err)
@@ -143,4 +143,19 @@ func (m *ShellCommand) ensureAuthenticatedToAws(awsConfig aws.Config) {
 		log.Errorf("It looks like you are not authenticated to AWS. Please authenticate before running Grimoire.")
 		os.Exit(1)
 	}
+}
+
+func (m *ShellCommand) isExecutionError(err error) bool {
+	// Ignore errors due to exit code 130 ("cancelled by ctrl+c")
+	var exitError *exec.ExitError
+	if errors.As(err, &exitError) {
+		if status, ok := exitError.Sys().(syscall.WaitStatus); ok {
+			if status.ExitStatus() == 130 {
+				// Ignore the error if the exit status is 130
+				return false
+			}
+		}
+	}
+
+	return true
 }

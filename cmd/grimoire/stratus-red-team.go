@@ -28,8 +28,7 @@ func NewRunCommand() *cobra.Command {
 	var outputFile string
 
 	runCmd := &cobra.Command{
-		Use:          "run",
-		Short:        "TODO",
+		Use:          "stratus-red-team",
 		SilenceUsage: true,
 		Example:      "TODO",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -48,8 +47,8 @@ func NewRunCommand() *cobra.Command {
 		},
 	}
 
-	runCmd.Flags().StringVarP(&stratusRedTeamAttackTechnique, "stratus-red-team-attack-technique", "", "", "TODO")
-	runCmd.Flags().StringVarP(&outputFile, "output-file", "o", "", "TODO")
+	runCmd.Flags().StringVarP(&stratusRedTeamAttackTechnique, "attack-technique", "", "", "TODO")
+	runCmd.Flags().StringVarP(&outputFile, "output", "o", "", "TODO")
 
 	return runCmd
 }
@@ -100,7 +99,7 @@ func (m *RunCommand) Do() error {
 	log.Info("Stratus Red Team attack technique successfully detonated")
 	var allEvents []map[string]interface{}
 
-	log.Info("Searching for CloudTrail logs...")
+	log.Info("Searching for CloudTrail events...")
 	results, err := cloudtrailLogs.FindLogs(ctx, detonation)
 	if err != nil {
 		return err

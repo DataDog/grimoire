@@ -118,7 +118,7 @@ func (m *CloudTrailEventsFinder) findEventsWithCloudTrailAsync(ctx context.Conte
 	}
 
 	if len(allEvents) == 0 {
-		results <- &CloudTrailResult{Error: fmt.Errorf("timed out after %f seconds waiting for CloudTrail logs", m.Options.WaitAtMost.Seconds())}
+		results <- &CloudTrailResult{Error: fmt.Errorf("timed out after %f seconds waiting for CloudTrail events", m.Options.WaitAtMost.Seconds())}
 		return
 	}
 }
