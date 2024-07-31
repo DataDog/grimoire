@@ -27,7 +27,7 @@ func NewStratusRedTeamDetonator(attackTechniqueID string) (*StratusRedTeamDetona
 func (m *StratusRedTeamDetonator) Detonate() (*DetonationInfo, error) {
 	ttp := m.AttackTechnique
 
-	m.StratusRunner = stratusrunner.NewRunner(ttp, stratusrunner.StratusRunnerNoForce)
+	m.StratusRunner = stratusrunner.NewRunner(ttp, stratusrunner.StratusRunnerForce)
 
 	log.Infof("Warming up Stratus Red Team attack technique %s", ttp)
 	if _, err := m.StratusRunner.WarmUp(); err != nil {
@@ -50,6 +50,10 @@ func (m *StratusRedTeamDetonator) Detonate() (*DetonationInfo, error) {
 
 func (m *StratusRedTeamDetonator) CleanUp() error {
 	return m.StratusRunner.CleanUp()
+}
+
+func (m *StratusRedTeamDetonator) GetAttackTechniqueState() stratus.AttackTechniqueState {
+	return m.StratusRunner.GetState()
 }
 
 func (m *StratusRedTeamDetonator) String() string {
