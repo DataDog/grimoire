@@ -22,7 +22,7 @@ brews:
           owner: datadog
           name: grimoire
           branch: main
-    folder: Formula
+    directory: Formula
     url_template: "https://github.com/DataDog/grimoire/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
     license: Apache-2.0
     homepage: "https://github.com/DataDog/grimoire"
