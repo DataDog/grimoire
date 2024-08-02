@@ -73,6 +73,7 @@ func (m *StratusRedTeamCommand) Do() error {
 			IncludeEvents:      includeEvents,
 			ExcludeEvents:      excludeEvents,
 			MaxEvents:          maxEvents,
+			WriteEventsOnly:    writeEventsOnly,
 			UserAgentMatchType: logs.UserAgentMatchTypeExact,
 		},
 	}

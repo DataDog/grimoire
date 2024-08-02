@@ -131,6 +131,7 @@ func (m *ShellCommand) Do() error {
 			IncludeEvents:      includeEvents,
 			ExcludeEvents:      excludeEvents,
 			MaxEvents:          maxEvents,
+			WriteEventsOnly:    writeEventsOnly,
 			UserAgentMatchType: logs.UserAgentMatchTypePartial,
 		},
 	}

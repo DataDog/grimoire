@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/service/cloudtrail"
 	"github.com/datadog/grimoire/pkg/grimoire/detonators"
+	grimoire "github.com/datadog/grimoire/pkg/grimoire/utils"
 	log "github.com/sirupsen/logrus"
 	"strings"
 	"time"
@@ -45,6 +46,11 @@ type CloudTrailEventLookupOptions struct {
 	// NOTE: Only one of IncludeEvents and ExcludeEvents can be used simultaneously, not both
 	// Event names should be in the format "[service]:[eventName]", e.g. "sts:GetCallerIdentity" and are case-insensitive
 	IncludeEvents []string
+
+	// Only keep write events (i.e., non-read-only events)
+	// see https://docs.aws.amazon.com/awscloudtrail/latest/userguide/logging-management-events-with-cloudtrail.html#read-write-events-mgmt
+	// this condition is evaluated in addition (and honoring) the IncludeEvents/ExcludeEvents lists
+	WriteEventsOnly bool
 
 	// UserAgentMatchType is the type of match to use when filtering by UserAgent
 	UserAgentMatchType UserAgentMatchType
@@ -194,11 +200,18 @@ func (m *CloudTrailEventsFinder) shouldKeepEvent(event *map[string]interface{}) 
 	eventName := (*event)["eventName"].(string)
 	eventSourceShort := strings.TrimSuffix((*event)["eventSource"].(string), ".amazonaws.com")
 	fullEventName := fmt.Sprintf("%s:%s", eventSourceShort, eventName) // e.g. "sts:GetCallerIdentity"
+	isReadOnly := (*event)["readOnly"].(bool)
+
+	if !m.eventReadOnlyStatusMatchesOptions(isReadOnly) {
+		log.Debugf("Ignoring event %s as it's read-only and we only want write events", fullEventName)
+		return false
+	}
 
 	// If an exclusion list is set, we exclude events that are in the list
 	if len(m.Options.ExcludeEvents) > 0 {
 		for i := range m.Options.ExcludeEvents {
-			if m.Options.ExcludeEvents[i] == fullEventName {
+			if grimoire.StringMatches(fullEventName, m.Options.ExcludeEvents[i]) {
+				log.Debug("Excluding event %s as it's on the exclude list", fullEventName)
 				return false
 			}
 		}
@@ -208,7 +221,8 @@ func (m *CloudTrailEventsFinder) shouldKeepEvent(event *map[string]interface{}) 
 	// If an inclusion list is set, we only include events that are in the list
 	if len(m.Options.IncludeEvents) == 0 {
 		for i := range m.Options.IncludeEvents {
-			if m.Options.IncludeEvents[i] == fullEventName {
+			if grimoire.StringMatches(fullEventName, m.Options.IncludeEvents[i]) {
+				log.Debug("Including event %s as it's on the include list", fullEventName)
 				return true
 			}
 		}
@@ -216,6 +230,10 @@ func (m *CloudTrailEventsFinder) shouldKeepEvent(event *map[string]interface{}) 
 	}
 
 	return true // no exclude nor include list, we keep everything
+}
+
+func (m *CloudTrailEventsFinder) eventReadOnlyStatusMatchesOptions(eventIsReadOnly bool) bool {
+	return !(m.Options.WriteEventsOnly && eventIsReadOnly)
 }
 
 func (m *CloudTrailEventsFinder) eventsMatchesDetonation(event map[string]interface{}, detonation *detonators.DetonationInfo) bool {
