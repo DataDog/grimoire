@@ -17,10 +17,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
-	"time"
 )
 
-type RunCommand struct {
+type StratusRedTeamCommand struct {
 	StratusRedTeamDetonator *detonators.StratusRedTeamDetonator
 	OutputFile              string
 	cleanupWg               sync.WaitGroup
@@ -33,11 +32,11 @@ type RunCommand struct {
 	sigChan                 chan os.Signal
 }
 
-func NewRunCommand() *cobra.Command {
+func NewStratusRedTeamCommand() *cobra.Command {
 	var stratusRedTeamAttackTechnique string
 	var outputFile string
 
-	runCmd := &cobra.Command{
+	stratusRedTeamCommand := &cobra.Command{
 		Use:          "stratus-red-team",
 		SilenceUsage: true,
 		Example:      "TODO",
@@ -49,7 +48,7 @@ func NewRunCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			command := RunCommand{
+			command := StratusRedTeamCommand{
 				StratusRedTeamDetonator: detonator,
 				OutputFile:              outputFile,
 			}
@@ -57,21 +56,24 @@ func NewRunCommand() *cobra.Command {
 		},
 	}
 
-	runCmd.Flags().StringVarP(&stratusRedTeamAttackTechnique, "attack-technique", "", "", "TODO")
-	runCmd.Flags().StringVarP(&outputFile, "output", "o", "", "TODO")
+	stratusRedTeamCommand.Flags().StringVarP(&stratusRedTeamAttackTechnique, "attack-technique", "", "", "TODO")
+	stratusRedTeamCommand.Flags().StringVarP(&outputFile, "output", "o", "", "TODO")
+	initLookupFlags(stratusRedTeamCommand)
 
-	return runCmd
+	return stratusRedTeamCommand
 }
 
-func (m *RunCommand) Do() error {
+func (m *StratusRedTeamCommand) Do() error {
 	awsConfig, _ := config.LoadDefaultConfig(context.Background())
 	cloudtrailLogs := &logs.CloudTrailEventsFinder{
 		CloudtrailClient: cloudtrail.NewFromConfig(awsConfig),
 		Options: &logs.CloudTrailEventLookupOptions{
-			WaitAtMost:                  10 * time.Minute,
-			SearchInterval:              5 * time.Second,
-			DebounceTimeAfterFirstEvent: 120 * time.Second,
-			UserAgentMatchType:          logs.UserAgentMatchTypeExact,
+			Timeout:            timeout,
+			LookupInterval:     lookupInterval,
+			IncludeEvents:      includeEvents,
+			ExcludeEvents:      excludeEvents,
+			MaxEvents:          maxEvents,
+			UserAgentMatchType: logs.UserAgentMatchTypeExact,
 		},
 	}
 
@@ -84,22 +86,26 @@ func (m *RunCommand) Do() error {
 
 	m.handleCtrlC()
 
-	detonation, err := m.detonateStratusRedTeam()
-	if err != nil {
-		return fmt.Errorf("unable to detonate Stratus Red Team attack technique %s: %w", m.StratusRedTeamDetonator.AttackTechnique, err)
-	}
+	detonation, detonationErr := m.detonateStratusRedTeam()
 
-	// The attack has been detonated successfully
+	// The attack has been detonated (whether successfully or not)
 	// We can already start cleaning up, in parallel of looking for the logs
 	// A mutex makes sure the main program doesn't exit while we're cleaning up
+	// NOTE: we intentionally start this routine before checking for detonation errors, because
+	// the Stratus Red Team detonate doesn't clean up failed detonations (by design)
 	go m.cleanupRoutineAsync()
+	defer m.shutDown()
+
+	if detonationErr != nil {
+		return fmt.Errorf("unable to detonate Stratus Red Team attack technique %s: %w", m.StratusRedTeamDetonator.AttackTechnique, detonationErr)
+	}
 
 	log.Info("Stratus Red Team attack technique successfully detonated")
 
 	log.Info("Searching for CloudTrail events...")
-	results, err := cloudtrailLogs.FindLogs(m.ctx, detonation)
-	if err != nil {
-		return err
+	results, detonationErr := cloudtrailLogs.FindLogs(m.ctx, detonation)
+	if detonationErr != nil {
+		return detonationErr
 	}
 
 	errorChan := make(chan error)
@@ -109,38 +115,16 @@ func (m *RunCommand) Do() error {
 
 	// Wait for event processing to be done, either due to a Ctrl+C either due to normal exit conditions
 	log.Debugf("Waiting for event processing to be done")
-	err = <-errorChan
+	err := <-errorChan
 	log.Debugf("Event processing done, received a result from the error channel")
 	if err != nil {
 		return err
 	}
 
-	// Make sure we wait until cleanup is finished before exiting
-	if m.cleanupRunning.Load() {
-		log.Info("Waiting for Stratus Red Team attack technique clean-up to complete...")
-	}
-	m.cleanupWg.Wait()
-	if m.cleanupSucceeded.Load() {
-		// Note: Stratus Red Team Cleanup function calls the Terraform Go Wrapper, which unfortunately
-		// catches Ctrl+C signals. This means that if the user presses Ctrl+C at "the wrong time", the cleanup
-		// will fail because the Terraform Wrapper will panic and exit
-
-		// Consequently, we have some logic baked in later in this function to retry the cleanup at the end if
-		// the asynchronous cleanup failed for this specific reason
-		log.Info("Asynchronous cleanup of the Stratus Red Team detonation failed, retrying one last time... don't press Ctrl+C")
-		if err := m.CleanupDetonation(); err != nil {
-			log.Warnf("unable to cleanup Stratus Red Team attack technique %s: %v", m.StratusRedTeamDetonator.AttackTechnique, err)
-			log.Warnf("You might want to manually clean it up by running 'stratus cleanup %s'", m.StratusRedTeamDetonator.AttackTechnique)
-		} else {
-			log.Info("Cleanup of the Stratus Red Team attack technique succeeded")
-		}
-	}
-	log.Debug("Cleanup finished, exiting")
-
 	return nil
 }
 
-func (m *RunCommand) handleNewEvent(event *map[string]interface{}) error {
+func (m *StratusRedTeamCommand) handleNewEvent(event *map[string]interface{}) error {
 	log.Printf("Found new CloudTrail event generated on %s UTC: %s", (*event)["eventTime"], (*event)["eventName"])
 	err := utils.AppendToJsonFileArray(m.OutputFile, *event)
 	if err != nil {
@@ -149,7 +133,7 @@ func (m *RunCommand) handleNewEvent(event *map[string]interface{}) error {
 	return nil
 }
 
-func (m *RunCommand) CleanupDetonation() error {
+func (m *StratusRedTeamCommand) CleanupDetonation() error {
 	m.cleanupMutex.Lock()
 	defer m.cleanupMutex.Unlock()
 	m.cleanupWg.Add(1)
@@ -166,7 +150,7 @@ func (m *RunCommand) CleanupDetonation() error {
 	return err
 }
 
-func (m *RunCommand) handleCtrlC() {
+func (m *StratusRedTeamCommand) handleCtrlC() {
 	m.sigChan = make(chan os.Signal, 1)
 	signal.Notify(m.sigChan, os.Interrupt, syscall.SIGTERM)
 	// Handle CTRL+C gracefully
@@ -185,7 +169,7 @@ func (m *RunCommand) handleCtrlC() {
 	}()
 }
 
-func (m *RunCommand) detonateStratusRedTeam() (*detonators.DetonationInfo, error) {
+func (m *StratusRedTeamCommand) detonateStratusRedTeam() (*detonators.DetonationInfo, error) {
 	// Detonate Stratus Red Team attack technique, honoring context cancellation
 	type StratusRedTeamDetonation struct {
 		detonation *detonators.DetonationInfo
@@ -210,7 +194,7 @@ func (m *RunCommand) detonateStratusRedTeam() (*detonators.DetonationInfo, error
 	}
 }
 
-func (m *RunCommand) cleanupRoutineAsync() {
+func (m *StratusRedTeamCommand) cleanupRoutineAsync() {
 	log.Info("Cleaning up Stratus Red Team detonation in the background")
 	if err := m.CleanupDetonation(); err != nil {
 		// Note: Stratus Red Team Cleanup function calls the Terraform Go Wrapper, which unfortunately
@@ -226,7 +210,7 @@ func (m *RunCommand) cleanupRoutineAsync() {
 	}
 }
 
-func (m *RunCommand) processingLoop(results <-chan *logs.CloudTrailResult, errorChan chan error) {
+func (m *StratusRedTeamCommand) processingLoop(results <-chan *logs.CloudTrailResult, errorChan chan error) {
 	for {
 		select {
 
@@ -263,4 +247,28 @@ func (m *RunCommand) processingLoop(results <-chan *logs.CloudTrailResult, error
 			return
 		}
 	}
+}
+
+func (m *StratusRedTeamCommand) shutDown() {
+	// Make sure we wait until cleanup is finished before exiting
+	if m.cleanupRunning.Load() {
+		log.Info("Waiting for Stratus Red Team attack technique clean-up to complete...")
+	}
+	m.cleanupWg.Wait()
+	if !m.cleanupSucceeded.Load() {
+		// Note: Stratus Red Team Cleanup function calls the Terraform Go Wrapper, which unfortunately
+		// catches Ctrl+C signals. This means that if the user presses Ctrl+C at "the wrong time", the cleanup
+		// will fail because the Terraform Wrapper will panic and exit
+
+		// Consequently, we have some logic baked in later in this function to retry the cleanup at the end if
+		// the asynchronous cleanup failed for this specific reason
+		log.Info("Asynchronous cleanup of the Stratus Red Team detonation failed, retrying one last time... don't press Ctrl+C")
+		if err := m.CleanupDetonation(); err != nil {
+			log.Warnf("unable to cleanup Stratus Red Team attack technique %s: %v", m.StratusRedTeamDetonator.AttackTechnique, err)
+			log.Warnf("You might want to manually clean it up by running 'stratus cleanup %s'", m.StratusRedTeamDetonator.AttackTechnique)
+		} else {
+			log.Info("Cleanup of the Stratus Red Team attack technique succeeded")
+		}
+	}
+	log.Debug("Cleanup finished, exiting")
 }
