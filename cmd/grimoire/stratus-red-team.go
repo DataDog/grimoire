@@ -96,7 +96,6 @@ func (m *RunCommand) Do() error {
 	go m.cleanupRoutineAsync()
 
 	log.Info("Stratus Red Team attack technique successfully detonated")
-	var allEvents []map[string]interface{}
 
 	log.Info("Searching for CloudTrail events...")
 	results, err := cloudtrailLogs.FindLogs(m.ctx, detonation)
@@ -107,7 +106,7 @@ func (m *RunCommand) Do() error {
 	errorChan := make(chan error)
 
 	// Main processing loop that consumes events and streams them out
-	go m.processingLoop(results, errorChan, &allEvents)
+	go m.processingLoop(results, errorChan)
 
 	// Wait for event processing to be done, either due to a Ctrl+C either due to normal exit conditions
 	log.Debugf("Waiting for event processing to be done")
@@ -115,10 +114,6 @@ func (m *RunCommand) Do() error {
 	log.Debugf("Event processing done, received a result from the error channel")
 	if err != nil {
 		return err
-	}
-
-	if err := m.writeToFile(allEvents); err != nil {
-		return fmt.Errorf("unable to write events to file: %w", err)
 	}
 
 	// Make sure we wait until cleanup is finished before exiting
@@ -137,6 +132,8 @@ func (m *RunCommand) Do() error {
 		if err := m.CleanupDetonation(); err != nil {
 			log.Warnf("unable to cleanup Stratus Red Team attack technique %s: %v", m.StratusRedTeamDetonator.AttackTechnique, err)
 			log.Warnf("You might want to manually clean it up by running 'stratus cleanup %s'", m.StratusRedTeamDetonator.AttackTechnique)
+		} else {
+			log.Info("Cleanup of the Stratus Red Team attack technique succeeded")
 		}
 	}
 	log.Debug("Cleanup finished, exiting")
@@ -183,7 +180,7 @@ func (m *RunCommand) CleanupDetonation() error {
 		m.cleanupSucceeded.Store(true)
 	}
 
-	log.Debug("Clean-up routing completed")
+	log.Debug("Clean-up routine completed")
 	return err
 }
 
@@ -247,7 +244,7 @@ func (m *RunCommand) cleanupRoutineAsync() {
 	}
 }
 
-func (m *RunCommand) processingLoop(results <-chan *logs.CloudTrailResult, errorChan chan error, allEvents *[]map[string]interface{}) {
+func (m *RunCommand) processingLoop(results <-chan *logs.CloudTrailResult, errorChan chan error) {
 	for {
 		select {
 
@@ -268,7 +265,6 @@ func (m *RunCommand) processingLoop(results <-chan *logs.CloudTrailResult, error
 			}
 
 			// Otherwise, we call handleNewEvent which will stream the newly-found event appropriately
-			*allEvents = append(*allEvents, *evt.CloudTrailEvent)
 			if err := m.handleNewEvent(evt.CloudTrailEvent); err != nil {
 				// If processing of this event fails, we abort execution
 				log.Errorf(err.Error())

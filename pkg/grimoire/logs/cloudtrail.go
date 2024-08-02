@@ -20,6 +20,8 @@ const (
 	UserAgentMatchTypePartial
 )
 
+const CloudtrailExtendWindowEndDuration = 10 * time.Second
+
 type CloudTrailEventsFinder struct {
 	CloudtrailClient *cloudtrail.Client
 	Options          *CloudTrailEventLookupOptions
@@ -157,9 +159,12 @@ func (m *CloudTrailEventsFinder) lookupEvents(ctx context.Context, detonation *d
 	if err := ctx.Err(); err != nil && errors.Is(err, context.Canceled) {
 		return nil, context.Canceled
 	}
+	// in some cases, the time logged in the CloudTrail event is a few seconds "late" in comparison
+	// to when the detonation happens
+	endTime := detonation.EndTime.Add(CloudtrailExtendWindowEndDuration)
 	paginator := cloudtrail.NewLookupEventsPaginator(m.CloudtrailClient, &cloudtrail.LookupEventsInput{
 		StartTime: &detonation.StartTime,
-		EndTime:   &detonation.EndTime,
+		EndTime:   &endTime,
 	})
 
 	log.WithField("start_time", detonation.StartTime).
