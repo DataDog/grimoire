@@ -202,7 +202,7 @@ func (m *CloudTrailEventsFinder) shouldKeepEvent(event *map[string]interface{}) 
 	fullEventName := fmt.Sprintf("%s:%s", eventSourceShort, eventName) // e.g. "sts:GetCallerIdentity"
 	isReadOnly := (*event)["readOnly"].(bool)
 
-	if !m.eventReadOnlyStatusMatchesOptions(isReadOnly) {
+	if m.Options.WriteEventsOnly && isReadOnly {
 		log.Debugf("Ignoring event %s as it's read-only and we only want write events", fullEventName)
 		return false
 	}
@@ -230,10 +230,6 @@ func (m *CloudTrailEventsFinder) shouldKeepEvent(event *map[string]interface{}) 
 	}
 
 	return true // no exclude nor include list, we keep everything
-}
-
-func (m *CloudTrailEventsFinder) eventReadOnlyStatusMatchesOptions(eventIsReadOnly bool) bool {
-	return !(m.Options.WriteEventsOnly && eventIsReadOnly)
 }
 
 func (m *CloudTrailEventsFinder) eventsMatchesDetonation(event map[string]interface{}, detonation *detonators.DetonationInfo) bool {
