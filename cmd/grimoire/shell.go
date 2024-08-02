@@ -48,6 +48,7 @@ func NewShellCommand() *cobra.Command {
 		},
 	}
 
+	initLookupFlags(shellCmd)
 	shellCmd.Flags().StringVarP(&outputFile, "output", "o", "", "TODO")
 	shellCmd.Flags().StringVarP(&commandToRun, "command", "c", "", "TODO")
 	shellCmd.Flags().StringVarP(&scriptToRun, "script", "", "", "TODO")
@@ -125,10 +126,12 @@ func (m *ShellCommand) Do() error {
 	cloudtrailLogs := &logs.CloudTrailEventsFinder{
 		CloudtrailClient: cloudtrail.NewFromConfig(awsConfig),
 		Options: &logs.CloudTrailEventLookupOptions{
-			WaitAtMost:                  10 * time.Minute,
-			SearchInterval:              15 * time.Second,
-			DebounceTimeAfterFirstEvent: 120 * time.Second,
-			UserAgentMatchType:          logs.UserAgentMatchTypePartial,
+			Timeout:            timeout,
+			LookupInterval:     lookupInterval,
+			IncludeEvents:      includeEvents,
+			ExcludeEvents:      excludeEvents,
+			MaxEvents:          maxEvents,
+			UserAgentMatchType: logs.UserAgentMatchTypePartial,
 		},
 	}
 

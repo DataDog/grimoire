@@ -28,7 +28,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVarP(&enableVerboseLogging, "debug", "v", false, "Enable debug logging")
 	rootCmd.PersistentFlags().BoolVarP(&enableVerboseLogging, "disable-banner", "", false, "Disable Grimoire ASCII-art banner")
 
-	rootCmd.AddCommand(NewRunCommand())
+	rootCmd.AddCommand(NewStratusRedTeamCommand())
 	rootCmd.AddCommand(NewShellCommand())
 	// Disable creation of the "completion" command
 	rootCmd.CompletionOptions.DisableDefaultCmd = true

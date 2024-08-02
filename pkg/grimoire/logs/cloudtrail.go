@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/service/cloudtrail"
 	"github.com/datadog/grimoire/pkg/grimoire/detonators"
-	utils "github.com/datadog/grimoire/pkg/grimoire/utils"
 	log "github.com/sirupsen/logrus"
 	"strings"
 	"time"
@@ -29,23 +28,23 @@ type CloudTrailEventsFinder struct {
 
 type CloudTrailEventLookupOptions struct {
 	// Timeout to find the *first* CloudTrail event
-	WaitAtMost time.Duration
-
-	// Lower bound on the time to wait for events
-	// Can be useful if for instance specific events are logged much faster than others
-	WaitAtLeast time.Duration
+	Timeout time.Duration
 
 	// Wait for at most this number of events to be found
-	WaitAtMostNumberOfEvents int
+	MaxEvents int
 
-	// Issue a new CloudTrail Lake search query every SearchInterval
-	SearchInterval time.Duration
-
-	// Once the first event is found, how much time to wait until there is no new event
-	DebounceTimeAfterFirstEvent time.Duration
+	// Issue a new CloudTrail lookup query every LookupInterval
+	LookupInterval time.Duration
 
 	// Exclude specific CloudTrail events from the search
+	// NOTE: Only one of IncludeEvents and ExcludeEvents can be used simultaneously, not both
+	// Event names should be in the format "[service]:[eventName]", e.g. "sts:GetCallerIdentity" and are case-insensitive
 	ExcludeEvents []string
+
+	// Only include specific CloudTrail events from the search
+	// NOTE: Only one of IncludeEvents and ExcludeEvents can be used simultaneously, not both
+	// Event names should be in the format "[service]:[eventName]", e.g. "sts:GetCallerIdentity" and are case-insensitive
+	IncludeEvents []string
 
 	// UserAgentMatchType is the type of match to use when filtering by UserAgent
 	UserAgentMatchType UserAgentMatchType
@@ -57,10 +56,9 @@ type CloudTrailResult struct {
 }
 
 func (m *CloudTrailEventsFinder) FindLogs(ctx context.Context, detonation *detonators.DetonationInfo) (chan *CloudTrailResult, error) {
-	if m.Options.WaitAtLeast.Seconds() > m.Options.WaitAtMost.Seconds() {
-		return nil, fmt.Errorf("invalid Options ('wait at least' should be lower or equal to 'wait at most')")
+	if len(m.Options.IncludeEvents) > 0 && len(m.Options.ExcludeEvents) > 0 {
+		return nil, errors.New("only zero or one of IncludeEvents and ExcludeEvents can be specified")
 	}
-
 	return m.findEventsWithCloudTrail(ctx, detonation)
 }
 
@@ -103,8 +101,7 @@ func (m *CloudTrailEventsFinder) findEventsWithCloudTrailAsync(ctx context.Conte
 
 	var allEvents = []map[string]interface{}{}
 	now := time.Now()
-	waitAtLeastUntil := now.Add(m.Options.WaitAtLeast)
-	deadline := now.Add(m.Options.WaitAtMost)
+	deadline := now.Add(m.Options.Timeout)
 
 	log.Debugf("Deadline for finding CloudTrail events is %s", deadline)
 
@@ -122,34 +119,26 @@ func (m *CloudTrailEventsFinder) findEventsWithCloudTrailAsync(ctx context.Conte
 
 			if len(newEventsFound) > 0 {
 				log.Debugf("Found %d new CloudTrail events", len(newEventsFound))
-				// At this point, we found at least CloudTrail event
-				// We now want to set a new "deadline", i.e. when we'll stop searching for further events
-				// Set this new deadline, honoring both "wait at least X" and "wait for Y seconds after new events" constraints
-				//
-				// Note: The loop will continue as long as we keep finding new CloudTrail events
-				newDeadline := time.Now().Add(m.Options.DebounceTimeAfterFirstEvent)
-				deadline = utils.Latest(newDeadline, waitAtLeastUntil)
-				log.Debugf("New deadline for finding CloudTrail events is %s", deadline)
 				for _, newEvent := range newEventsFound {
 					log.Debug("Publishing new event to asynchronous channel")
 					results <- &CloudTrailResult{CloudTrailEvent: newEvent}
 				}
 
 				// If we reached the max number of events to wait for, return as soon as possible
-				if m.Options.WaitAtMostNumberOfEvents > 0 && len(allEvents) >= m.Options.WaitAtMostNumberOfEvents {
-					log.Debugf("Reached %d events, stopping search", m.Options.WaitAtMostNumberOfEvents)
+				if m.Options.MaxEvents > 0 && len(allEvents) >= m.Options.MaxEvents {
+					log.Debugf("Reached %d events, stopping search", m.Options.MaxEvents)
 					return
 				}
 			} else {
 				log.Debug("Some CloudTrail events were returned, but no previously-unseen events were found")
 			}
 		}
-		log.Debugf("Sleeping for SearchInterval=%f seconds", m.Options.SearchInterval.Seconds())
-		time.Sleep(m.Options.SearchInterval)
+		log.Debugf("Sleeping for LookupInterval=%f seconds", m.Options.LookupInterval.Seconds())
+		time.Sleep(m.Options.LookupInterval)
 	}
 
 	if len(allEvents) == 0 {
-		results <- &CloudTrailResult{Error: fmt.Errorf("timed out after %f seconds waiting for CloudTrail events", m.Options.WaitAtMost.Seconds())}
+		results <- &CloudTrailResult{Error: fmt.Errorf("timed out after %f seconds waiting for CloudTrail events", m.Options.Timeout.Seconds())}
 		return
 	}
 }
@@ -186,7 +175,7 @@ func (m *CloudTrailEventsFinder) lookupEvents(ctx context.Context, detonation *d
 				json.Unmarshal([]byte(*event), &parsed)
 				eventName := parsed["eventName"].(string)
 				if m.eventsMatchesDetonation(parsed, detonation) {
-					if !m.isEventNameExcluded(eventName) {
+					if m.shouldKeepEvent(&parsed) {
 						log.Debugf("Found CloudTrail event %s matching detonation UID", eventName)
 						events = append(events, parsed)
 					} else {
@@ -199,13 +188,34 @@ func (m *CloudTrailEventsFinder) lookupEvents(ctx context.Context, detonation *d
 	return events, nil
 }
 
-func (m *CloudTrailEventsFinder) isEventNameExcluded(name string) bool {
-	for i := range m.Options.ExcludeEvents {
-		if m.Options.ExcludeEvents[i] == name {
-			return true
+func (m *CloudTrailEventsFinder) shouldKeepEvent(event *map[string]interface{}) bool {
+	// note: we know (precondition) that zero or one of IncludeEvents and ExcludeEvents is set, not both
+
+	eventName := (*event)["eventName"].(string)
+	eventSourceShort := strings.TrimSuffix((*event)["eventSource"].(string), ".amazonaws.com")
+	fullEventName := fmt.Sprintf("%s:%s", eventSourceShort, eventName) // e.g. "sts:GetCallerIdentity"
+
+	// If an exclusion list is set, we exclude events that are in the list
+	if len(m.Options.ExcludeEvents) > 0 {
+		for i := range m.Options.ExcludeEvents {
+			if m.Options.ExcludeEvents[i] == fullEventName {
+				return false
+			}
 		}
+		return true
 	}
-	return false
+
+	// If an inclusion list is set, we only include events that are in the list
+	if len(m.Options.IncludeEvents) == 0 {
+		for i := range m.Options.IncludeEvents {
+			if m.Options.IncludeEvents[i] == fullEventName {
+				return true
+			}
+		}
+		return false
+	}
+
+	return true // no exclude nor include list, we keep everything
 }
 
 func (m *CloudTrailEventsFinder) eventsMatchesDetonation(event map[string]interface{}, detonation *detonators.DetonationInfo) bool {
