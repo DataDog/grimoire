@@ -21,11 +21,25 @@ Supported logs backend:
 
 ## Installation
 
-Requires Go 1.22+:
+### Direct install
+
+Requires Go 1.22+
 
 ```bash
 go install -v github.com/datadog/grimoire/cmd/grimoire@latest
 ```
+
+### Homebrew
+
+```bash
+brew tap datadog/grimoire https://github.com/DataDog/grimoire
+brew install datadog/stratus-red-team/grimoire
+```
+
+### Pre-built binaries
+
+Download one of the pre-built binaries from the [releases page](https://github.com/DataDog/grimoire/releases).
+
 
 ## Getting started
 
@@ -120,6 +134,27 @@ INFO[0000] Running detonation script: /tmp/script.sh
 +/tmp/script.sh:3> aws iam create-access-key --user-name foobar
 INFO[0005] Searching for CloudTrail events...
 ```
+
+### Advanced usage
+
+You can use `--timeout`, `--max-events`, `--include-events`, `--exclude-events` and `--only-write-events` to control how long Grimoire should poll CloudTrail, how many events to retrieve, and which events to include or exclude.
+
+```bash
+# Wait for a single sts:GetCallerIdentity event and exit
+grimoire shell --command 'aws sts get-caller-identity' --include-events 'sts:GetCallerIdentity' --max-events 1
+
+# Only keep iam:* events and exit after 5 minutes or 2 events (whichever comes first)
+grimoire stratus-red-team --attack-technique aws.persistence.iam-create-admin-user --include-events 'iam:*' --max-events 2 --timeout 3m
+
+# Only keep IAM write events
+grimoire shell --script /tmp/attack.sh --include-events 'iam:*' --only-write-events
+
+# Exclude sts:AssumeRole events
+grimoire shell --script /tmp/attack.sh --exclude-events 'sts:GetCallerIdentity'
+
+# Wait for at least one IAM or EC2 write event and exit. Fail if the logs aren't available within 10 minutes.
+grimoire shell --script /tmp/attack.sh --only-write-events --include-events 'iam:*,ec2:*' --max-events 1 --timeout 10m
+```
 ## Development
 
 Running locally:
@@ -134,7 +169,13 @@ Use `--debug` for verbose logging.
 Building binaries:
 
 ```bash
-go build -o grimoire cmd/grimoire/*.go
+make
+```
+
+Running the tests:
+
+```bash
+make test
 ```
 
 ## Disclaimer
