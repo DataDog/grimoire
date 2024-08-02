@@ -15,13 +15,6 @@ brews:
     repository:
       owner: datadog
       name: grimoire
-      branch: "homebrew-update-{{ .Version	}}"
-      pull_request:
-        enabled: true
-        base:
-          owner: datadog
-          name: grimoire
-          branch: main
     directory: Formula
     url_template: "https://github.com/DataDog/grimoire/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
     license: Apache-2.0
