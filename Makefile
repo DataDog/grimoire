@@ -1,7 +1,6 @@
-BIN_DIR := $(ROOT_DIR)/bin
-
 MAKEFILE_PATH := $(abspath $(lastword $(MAKEFILE_LIST)))
 ROOT_DIR := $(dir $(MAKEFILE_PATH))
+BIN_DIR := $(ROOT_DIR)/bin
 
 build:
 	@echo "Building Grimoire..."
