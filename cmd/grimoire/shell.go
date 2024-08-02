@@ -170,14 +170,10 @@ func (m *ShellCommand) ensureAuthenticatedToAws(awsConfig aws.Config) {
 }
 
 func (m *ShellCommand) isExecutionError(err error) bool {
-	// Ignore errors due to exit code 130 ("cancelled by ctrl+c")
 	var exitError *exec.ExitError
 	if errors.As(err, &exitError) {
-		if status, ok := exitError.Sys().(syscall.WaitStatus); ok {
-			if status.ExitStatus() == 130 {
-				// Ignore the error if the exit status is 130
-				return false
-			}
+		if _, ok := exitError.Sys().(syscall.WaitStatus); ok {
+			return false
 		}
 	}
 
