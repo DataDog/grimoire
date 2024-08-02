@@ -211,7 +211,7 @@ func (m *CloudTrailEventsFinder) shouldKeepEvent(event *map[string]interface{}) 
 	if len(m.Options.ExcludeEvents) > 0 {
 		for i := range m.Options.ExcludeEvents {
 			if grimoire.StringMatches(fullEventName, m.Options.ExcludeEvents[i]) {
-				log.Debug("Excluding event %s as it's on the exclude list", fullEventName)
+				log.Debugf("Excluding event %s as it's on the exclude list", fullEventName)
 				return false
 			}
 		}
@@ -222,7 +222,7 @@ func (m *CloudTrailEventsFinder) shouldKeepEvent(event *map[string]interface{}) 
 	if len(m.Options.IncludeEvents) == 0 {
 		for i := range m.Options.IncludeEvents {
 			if grimoire.StringMatches(fullEventName, m.Options.IncludeEvents[i]) {
-				log.Debug("Including event %s as it's on the include list", fullEventName)
+				log.Debugf("Including event %s as it's on the include list", fullEventName)
 				return true
 			}
 		}

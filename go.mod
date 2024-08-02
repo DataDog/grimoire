@@ -10,10 +10,11 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/cloudtrail v1.42.1
 	github.com/aws/aws-sdk-go-v2/service/sts v1.30.1
 	github.com/common-nighthawk/go-figure v0.0.0-20210622060536-734e95fb86be
-	github.com/datadog/stratus-red-team/v2 v2.15.0
+	github.com/datadog/stratus-red-team/v2 v2.16.0
 	github.com/google/uuid v1.6.0
 	github.com/sirupsen/logrus v1.4.1
 	github.com/spf13/cobra v1.6.0
+	github.com/stretchr/testify v1.9.0
 )
 
 require (
@@ -37,6 +38,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/internal/v4a v1.3.13 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ec2 v1.168.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ec2instanceconnect v1.25.1 // indirect
+	github.com/aws/aws-sdk-go-v2/service/eks v1.46.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/iam v1.34.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.11.3 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.3.15 // indirect
@@ -93,7 +95,9 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/mxk/go-flowrate v0.0.0-20140419014527-cca7078d478f // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
+	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/zclconf/go-cty v1.11.0 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.53.0 // indirect
