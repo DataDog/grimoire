@@ -137,6 +137,9 @@ Building binaries:
 go build -o grimoire cmd/grimoire/*.go
 ```
 
+## Disclaimer
+
+When detonating attacks with Stratus Red Team, it's best to avoid interrupting execution with Ctrl+C while the technique is being detonated. While we take a great deal of care to clean up after ourselves, it may happen that some resources are left behind, specifically because the [terraform-exec](https://github.com/hashicorp/terraform-exec) wrapper used by Stratus Red Team panics on Ctrl+c and doesn't offer an option to exit cleanly.
 ## FAQ
 
 ### Why are CloudTrail events slow to arrive?
