@@ -19,6 +19,7 @@ type StratusRedTeamDetonator struct {
 func NewStratusRedTeamDetonator(attackTechniqueID string) (*StratusRedTeamDetonator, error) {
 	ttp := stratus.GetRegistry().GetAttackTechniqueByName(attackTechniqueID)
 	if ttp == nil {
+		//lint:ignore ST1005 "Stratus Red Team" is a proper noun
 		return nil, fmt.Errorf("Stratus Red Team attack technique %s not found", attackTechniqueID)
 	}
 	return &StratusRedTeamDetonator{AttackTechnique: ttp}, nil

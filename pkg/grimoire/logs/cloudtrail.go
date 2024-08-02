@@ -192,9 +192,6 @@ func (m *CloudTrailEventsFinder) lookupEvents(ctx context.Context, detonation *d
 					} else {
 						log.Debugf("Found CloudTrail event %s matching detonation UID, but ignoring as it's on the exclude list", eventName)
 					}
-				} else {
-					// logging disabled for now, was noisy
-					//log.Debugf("Found CloudTrail event %s but it does not match detonation UID", eventName)
 				}
 			}
 		}
@@ -216,7 +213,7 @@ func (m *CloudTrailEventsFinder) eventsMatchesDetonation(event map[string]interf
 
 	switch m.Options.UserAgentMatchType {
 	case UserAgentMatchTypeExact:
-		return strings.ToLower(userAgent) == strings.ToLower(detonation.DetonationID)
+		return strings.EqualFold(userAgent, detonation.DetonationID)
 	case UserAgentMatchTypePartial:
 		return strings.Contains(userAgent, detonation.DetonationID)
 	default:

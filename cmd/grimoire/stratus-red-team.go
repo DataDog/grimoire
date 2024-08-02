@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -117,11 +116,11 @@ func (m *RunCommand) Do() error {
 	}
 
 	// Make sure we wait until cleanup is finished before exiting
-	if m.cleanupRunning.Load() == true {
+	if m.cleanupRunning.Load() {
 		log.Info("Waiting for Stratus Red Team attack technique clean-up to complete...")
 	}
 	m.cleanupWg.Wait()
-	if m.cleanupSucceeded.Load() == false {
+	if m.cleanupSucceeded.Load() {
 		// Note: Stratus Red Team Cleanup function calls the Terraform Go Wrapper, which unfortunately
 		// catches Ctrl+C signals. This means that if the user presses Ctrl+C at "the wrong time", the cleanup
 		// will fail because the Terraform Wrapper will panic and exit
@@ -146,23 +145,6 @@ func (m *RunCommand) handleNewEvent(event *map[string]interface{}) error {
 	err := utils.AppendToJsonFileArray(m.OutputFile, *event)
 	if err != nil {
 		return fmt.Errorf("unable to write CloudTrail event to %s: %v", m.OutputFile, err)
-	}
-	return nil
-}
-
-func (m *RunCommand) writeToFile(events []map[string]interface{}) error {
-	if m.OutputFile == "" {
-		return nil // nothing to do
-	}
-	outputBytes, err := json.MarshalIndent(events, "", "   ")
-	if err != nil {
-		return err
-	}
-
-	if m.OutputFile == "-" {
-		fmt.Println(string(outputBytes))
-	} else if err := os.WriteFile(m.OutputFile, outputBytes, 0600); err != nil {
-		return err
 	}
 	return nil
 }
