@@ -22,13 +22,14 @@ func NewStratusRedTeamDetonator(attackTechniqueID string) (*StratusRedTeamDetona
 		//lint:ignore ST1005 "Stratus Red Team" is a proper noun
 		return nil, fmt.Errorf("Stratus Red Team attack technique %s not found", attackTechniqueID)
 	}
-	return &StratusRedTeamDetonator{AttackTechnique: ttp}, nil
+	return &StratusRedTeamDetonator{
+		AttackTechnique: ttp,
+		StratusRunner:   stratusrunner.NewRunner(ttp, stratusrunner.StratusRunnerForce),
+	}, nil
 }
 
 func (m *StratusRedTeamDetonator) Detonate() (*DetonationInfo, error) {
 	ttp := m.AttackTechnique
-
-	m.StratusRunner = stratusrunner.NewRunner(ttp, stratusrunner.StratusRunnerForce)
 
 	log.Infof("Warming up Stratus Red Team attack technique %s", ttp)
 	if _, err := m.StratusRunner.WarmUp(); err != nil {
