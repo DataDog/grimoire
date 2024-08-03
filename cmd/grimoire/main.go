@@ -14,14 +14,22 @@ var disableBanner = false
 var rootCmd = &cobra.Command{
 	Use: "grimoire",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		if enableVerboseLogging {
-			log.SetLevel(log.DebugLevel)
-		}
+		setupLogging()
 		if !disableBanner {
 			figure.NewColorFigure("Grimoire", "", "purple", true).Print()
 			fmt.Println()
 		}
 	},
+}
+
+func setupLogging() {
+	if enableVerboseLogging {
+		log.SetLevel(log.DebugLevel)
+	}
+	customFormatter := new(log.TextFormatter)
+	customFormatter.TimestampFormat = "2006-01-02 15:04:05"
+	customFormatter.FullTimestamp = true
+	log.SetFormatter(customFormatter)
 }
 
 func init() {
@@ -35,7 +43,6 @@ func init() {
 }
 
 func main() {
-
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}

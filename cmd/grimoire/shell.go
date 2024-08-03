@@ -132,6 +132,7 @@ func (m *ShellCommand) Do() error {
 			ExcludeEvents:      excludeEvents,
 			MaxEvents:          maxEvents,
 			WriteEventsOnly:    writeEventsOnly,
+			ExtendTimeWindow:   extendSearchWindow,
 			UserAgentMatchType: logs.UserAgentMatchTypePartial,
 		},
 	}

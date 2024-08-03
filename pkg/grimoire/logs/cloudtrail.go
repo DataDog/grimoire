@@ -20,8 +20,6 @@ const (
 	UserAgentMatchTypePartial
 )
 
-const CloudtrailExtendWindowEndDuration = 10 * time.Second
-
 type CloudTrailEventsFinder struct {
 	CloudtrailClient *cloudtrail.Client
 	Options          *CloudTrailEventLookupOptions
@@ -54,6 +52,10 @@ type CloudTrailEventLookupOptions struct {
 
 	// UserAgentMatchType is the type of match to use when filtering by UserAgent
 	UserAgentMatchType UserAgentMatchType
+
+	// in some cases, the time logged in the CloudTrail event is a few seconds "late" in comparison to when the detonation happens
+	// ExtendTimeWindow allows to extend as appropriate the end time of the CloudTrail lookup
+	ExtendTimeWindow time.Duration
 }
 
 type CloudTrailResult struct {
@@ -154,9 +156,9 @@ func (m *CloudTrailEventsFinder) lookupEvents(ctx context.Context, detonation *d
 	if err := ctx.Err(); err != nil && errors.Is(err, context.Canceled) {
 		return nil, context.Canceled
 	}
-	// in some cases, the time logged in the CloudTrail event is a few seconds "late" in comparison
-	// to when the detonation happens
-	endTime := detonation.EndTime.Add(CloudtrailExtendWindowEndDuration)
+
+	// in some cases, the time logged in the CloudTrail event is a few seconds "late" in comparison to when the detonation happens
+	endTime := detonation.EndTime.Add(m.Options.ExtendTimeWindow)
 	paginator := cloudtrail.NewLookupEventsPaginator(m.CloudtrailClient, &cloudtrail.LookupEventsInput{
 		StartTime: &detonation.StartTime,
 		EndTime:   &endTime,
@@ -185,7 +187,7 @@ func (m *CloudTrailEventsFinder) lookupEvents(ctx context.Context, detonation *d
 						log.Debugf("Found CloudTrail event %s matching detonation UID", eventName)
 						events = append(events, parsed)
 					} else {
-						log.Debugf("Found CloudTrail event %s matching detonation UID, but ignoring as it's on the exclude list", eventName)
+						log.Debugf("Found CloudTrail event %s matching detonation UID, but ignoring as it's on the exclude list or not in the include list", eventName)
 					}
 				}
 			}
@@ -219,7 +221,7 @@ func (m *CloudTrailEventsFinder) shouldKeepEvent(event *map[string]interface{}) 
 	}
 
 	// If an inclusion list is set, we only include events that are in the list
-	if len(m.Options.IncludeEvents) == 0 {
+	if len(m.Options.IncludeEvents) > 0 {
 		for i := range m.Options.IncludeEvents {
 			if grimoire.StringMatches(fullEventName, m.Options.IncludeEvents[i]) {
 				log.Debugf("Including event %s as it's on the include list", fullEventName)
