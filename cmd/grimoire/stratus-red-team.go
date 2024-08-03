@@ -127,7 +127,7 @@ func (m *StratusRedTeamCommand) Do() error {
 }
 
 func (m *StratusRedTeamCommand) handleNewEvent(event *map[string]interface{}) error {
-	log.Printf("Found new CloudTrail event generated on %s UTC: %s", (*event)["eventTime"], (*event)["eventName"])
+	log.Printf("Found new CloudTrail event generated on %s UTC: %s", (*event)["eventTime"], utils.GetCloudTrailEventFullName(event))
 	err := utils.AppendToJsonFileArray(m.OutputFile, *event)
 	if err != nil {
 		return fmt.Errorf("unable to write CloudTrail event to %s: %v", m.OutputFile, err)

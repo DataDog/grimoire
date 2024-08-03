@@ -199,9 +199,7 @@ func (m *CloudTrailEventsFinder) lookupEvents(ctx context.Context, detonation *d
 func (m *CloudTrailEventsFinder) shouldKeepEvent(event *map[string]interface{}) bool {
 	// note: we know (precondition) that zero or one of IncludeEvents and ExcludeEvents is set, not both
 
-	eventName := (*event)["eventName"].(string)
-	eventSourceShort := strings.TrimSuffix((*event)["eventSource"].(string), ".amazonaws.com")
-	fullEventName := fmt.Sprintf("%s:%s", eventSourceShort, eventName) // e.g. "sts:GetCallerIdentity"
+	fullEventName := grimoire.GetCloudTrailEventFullName(event)
 	isReadOnly := (*event)["readOnly"].(bool)
 
 	if m.Options.WriteEventsOnly && isReadOnly {

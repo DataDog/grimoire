@@ -155,7 +155,7 @@ func (m *ShellCommand) Do() error {
 			os.Exit(1)
 		}
 
-		log.Infof("Found event: %s", (*evt.CloudTrailEvent)["eventName"])
+		log.Infof("Found event: %s", utils.GetCloudTrailEventFullName(evt.CloudTrailEvent))
 		if err := utils.AppendToJsonFileArray(m.OutputFile, *evt.CloudTrailEvent); err != nil {
 			log.Errorf("unable to append CloudTrail event to output file: %v", err)
 		}
