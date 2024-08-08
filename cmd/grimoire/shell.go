@@ -34,7 +34,7 @@ func NewShellCommand() *cobra.Command {
 	shellCmd := &cobra.Command{
 		Use:          "shell",
 		SilenceUsage: true,
-		Example:      "TODO",
+		Example:      "Run an interactive shell. Grimoire will inject a unique identifier to your HTTP user agent when using the AWS CLI.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			command := ShellCommand{
 				OutputFile:   outputFile,
@@ -49,9 +49,9 @@ func NewShellCommand() *cobra.Command {
 	}
 
 	initLookupFlags(shellCmd)
-	shellCmd.Flags().StringVarP(&outputFile, "output", "o", "", "TODO")
-	shellCmd.Flags().StringVarP(&commandToRun, "command", "c", "", "TODO")
-	shellCmd.Flags().StringVarP(&scriptToRun, "script", "", "", "TODO")
+	shellCmd.Flags().StringVarP(&outputFile, "output", "o", "", "Output file to write CloudTrail events to. Grimoire will overwrite the file if it exists, and create otherwise.")
+	shellCmd.Flags().StringVarP(&commandToRun, "command", "c", "", "Command to execute in the shell (instead of running an interactive shell)")
+	shellCmd.Flags().StringVarP(&scriptToRun, "script", "", "", "Path to a script to execute in the shell (instead of running an interactive shell)")
 
 	return shellCmd
 }

@@ -39,7 +39,7 @@ func NewStratusRedTeamCommand() *cobra.Command {
 	stratusRedTeamCommand := &cobra.Command{
 		Use:          "stratus-red-team",
 		SilenceUsage: true,
-		Example:      "TODO",
+		Example:      "Detonate a Stratus Red Team attack technique",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if stratusRedTeamAttackTechnique == "" {
 				return errors.New("missing Stratus Red Team attack technique")
@@ -56,8 +56,8 @@ func NewStratusRedTeamCommand() *cobra.Command {
 		},
 	}
 
-	stratusRedTeamCommand.Flags().StringVarP(&stratusRedTeamAttackTechnique, "attack-technique", "", "", "TODO")
-	stratusRedTeamCommand.Flags().StringVarP(&outputFile, "output", "o", "", "TODO")
+	stratusRedTeamCommand.Flags().StringVarP(&stratusRedTeamAttackTechnique, "attack-technique", "", "", "Stratus Red Team attack technique to detonate. Use 'stratus list' to list available attack techniques or browse https://stratus-red-team.cloud/attack-techniques/list/.")
+	stratusRedTeamCommand.Flags().StringVarP(&outputFile, "output", "o", "", "Output file to write CloudTrail events to. Grimoire will overwrite the file if it exists, and create otherwise.")
 	initLookupFlags(stratusRedTeamCommand)
 
 	return stratusRedTeamCommand
