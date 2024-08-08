@@ -5,21 +5,21 @@
 class Grimoire < Formula
   desc ""
   homepage "https://github.com/DataDog/grimoire"
-  version "0.0.1"
+  version "0.1.0"
   license "Apache-2.0"
 
   on_macos do
     on_intel do
-      url "https://github.com/DataDog/grimoire/releases/download/v0.0.1/grimoire_Darwin_x86_64.tar.gz"
-      sha256 "a0a92ab60593a88503cc840a5207f69542772d40603c4c9092d13e78326fd253"
+      url "https://github.com/DataDog/grimoire/releases/download/v0.1.0/grimoire_Darwin_x86_64.tar.gz"
+      sha256 "ad353966a5b52dbb7777314e2115f39256e299bd9ceec849685eb830c7981689"
 
       def install
         bin.install "grimoire"
       end
     end
     on_arm do
-      url "https://github.com/DataDog/grimoire/releases/download/v0.0.1/grimoire_Darwin_arm64.tar.gz"
-      sha256 "619633491406e5772110ff8931c47aba01b26add3172c1f4c121d52dd96c464c"
+      url "https://github.com/DataDog/grimoire/releases/download/v0.1.0/grimoire_Darwin_arm64.tar.gz"
+      sha256 "a095df2d86790cf63b9b74e19aa26cbb98b541464419ab973ef719a6ecfd2e9e"
 
       def install
         bin.install "grimoire"
@@ -30,8 +30,8 @@ class Grimoire < Formula
   on_linux do
     on_intel do
       if Hardware::CPU.is_64_bit?
-        url "https://github.com/DataDog/grimoire/releases/download/v0.0.1/grimoire_Linux_x86_64.tar.gz"
-        sha256 "e98fc99f43260e9cffc2dc639fb9634b70c5ffe5becdb12c6ed864e6a1ad2816"
+        url "https://github.com/DataDog/grimoire/releases/download/v0.1.0/grimoire_Linux_x86_64.tar.gz"
+        sha256 "4b75dd11ea9dc1c18596be917b9abf6cb2035319db47546c639827e34fb61392"
 
         def install
           bin.install "grimoire"
@@ -40,8 +40,8 @@ class Grimoire < Formula
     end
     on_arm do
       if Hardware::CPU.is_64_bit?
-        url "https://github.com/DataDog/grimoire/releases/download/v0.0.1/grimoire_Linux_arm64.tar.gz"
-        sha256 "da872e00a990213954a14f8b648ee97437f1a7b6fa3bc8cb8a65600a3c92d673"
+        url "https://github.com/DataDog/grimoire/releases/download/v0.1.0/grimoire_Linux_arm64.tar.gz"
+        sha256 "e38ccb465cb1ae0c7ab974cec00fe1c9220e36cda0239d7ea54f4be9ec54dd86"
 
         def install
           bin.install "grimoire"
