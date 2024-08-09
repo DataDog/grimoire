@@ -44,7 +44,7 @@ go install -v github.com/datadog/grimoire/cmd/grimoire@latest
 
 ```bash
 brew tap datadog/grimoire https://github.com/DataDog/grimoire
-brew install datadog/stratus-red-team/grimoire
+brew install datadog/grimoire/grimoire
 ```
 
 ### Pre-built binaries
