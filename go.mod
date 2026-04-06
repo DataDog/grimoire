@@ -2,7 +2,7 @@ module github.com/datadog/grimoire
 
 go 1.22.0
 
-toolchain go1.22.1
+toolchain go1.26.1
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.30.3
