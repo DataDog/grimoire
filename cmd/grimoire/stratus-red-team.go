@@ -235,7 +235,7 @@ func (m *StratusRedTeamCommand) processingLoop(results <-chan *logs.CloudTrailRe
 			// Otherwise, we call handleNewEvent which will stream the newly-found event appropriately
 			if err := m.handleNewEvent(evt.CloudTrailEvent); err != nil {
 				// If processing of this event fails, we abort execution
-				log.Errorf(err.Error())
+				log.Error(err)
 				m.cancel()
 				errorChan <- err
 				return
